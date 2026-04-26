@@ -116,7 +116,7 @@ For `unknown` tools, the new `surface_probe` tool issues a minimal POST with emp
     "kind": "nextauth",
     "csrfPath": "/api/auth/csrf",
     "callbackPath": "/api/auth/callback/credentials",
-    "cookieName": "next-auth.session-token",
+    "cookieName": "authjs.session-token",
     "fields": { "email": "email", "password": "password" }
   }
 }
@@ -358,7 +358,7 @@ type AuthConfig =
       kind: 'nextauth';                       // Auth.js v5 convenience
       csrfPath?: string;                      // default '/api/auth/csrf'
       callbackPath?: string;                  // default '/api/auth/callback/credentials'
-      cookieName?: string;                    // default 'next-auth.session-token' (with __Secure- prefix detection)
+      cookieName?: string;                    // when unset, both 'authjs.session-token' (v5) and 'next-auth.session-token' (v4) are detected, with __Secure- prefix variants
       fields: Record<string,string>;          // typically { email, password }
       callbackUrl?: string;                   // default '/'
     }

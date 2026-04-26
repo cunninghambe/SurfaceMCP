@@ -220,3 +220,137 @@ describe('CSRF form auth with preLogin', () => {
     }
   });
 });
+
+// Auth.js v5 emits 'authjs.session-token' (or '__Secure-authjs.session-token').
+// Auth.js v4 used 'next-auth.session-token'. When cookieName is unset,
+// loginNextAuth must accept either so a single config works against both.
+function createNextAuthLikeServer(
+  cookieName: string
+): Promise<{ baseUrl: string; close: () => void }> {
+  return new Promise((resolve) => {
+    const http = require('node:http') as typeof import('node:http');
+    const { randomUUID } = require('node:crypto') as typeof import('node:crypto');
+    const csrfTokens = new Set<string>();
+    const server = http.createServer((req, res) => {
+      const url = req.url ?? '';
+      if (req.method === 'GET' && url === '/api/auth/csrf') {
+        const token = randomUUID();
+        csrfTokens.add(token);
+        res.writeHead(200, {
+          'Content-Type': 'application/json',
+          'Set-Cookie': `__Host-authjs.csrf-token=${token}; HttpOnly; Path=/`,
+        });
+        res.end(JSON.stringify({ csrfToken: token }));
+        return;
+      }
+      if (req.method === 'POST' && url === '/api/auth/callback/credentials') {
+        let body = '';
+        req.on('data', (c) => (body += c.toString()));
+        req.on('end', () => {
+          const params = new URLSearchParams(body);
+          const csrf = params.get('csrfToken') ?? '';
+          if (!csrfTokens.has(csrf)) {
+            res.writeHead(401);
+            res.end();
+            return;
+          }
+          if (
+            params.get('email') === 'owner@test.local' &&
+            params.get('password') === 'pw'
+          ) {
+            res.writeHead(302, {
+              Location: '/',
+              'Set-Cookie': `${cookieName}=${randomUUID()}; HttpOnly; Path=/`,
+            });
+            res.end();
+          } else {
+            res.writeHead(401);
+            res.end();
+          }
+        });
+        return;
+      }
+      res.writeHead(404);
+      res.end();
+    });
+    server.listen(0, '127.0.0.1', () => {
+      const address = server.address();
+      const port =
+        address && typeof address === 'object' ? address.port : 0;
+      resolve({
+        baseUrl: `http://127.0.0.1:${port}`,
+        close: () => server.close(),
+      });
+    });
+  });
+}
+
+describe('Auth.js v5 nextauth login', () => {
+  it('accepts authjs.session-token (v5) when cookieName is unset', async () => {
+    const { baseUrl, close } = await createNextAuthLikeServer(
+      'authjs.session-token'
+    );
+    try {
+      const { loginNextAuth } = await import('./nextauth.js');
+      const result = await loginNextAuth(
+        baseUrl,
+        { kind: 'nextauth', fields: { email: 'email', password: 'password' } },
+        { email: 'owner@test.local', password: 'pw' }
+      );
+      expect(result.ok).toBe(true);
+      expect(
+        result.cookies.some((c) => c.startsWith('authjs.session-token='))
+      ).toBe(true);
+    } finally {
+      close();
+    }
+  });
+
+  it('accepts next-auth.session-token (v4) when cookieName is unset', async () => {
+    const { baseUrl, close } = await createNextAuthLikeServer(
+      'next-auth.session-token'
+    );
+    try {
+      const { loginNextAuth } = await import('./nextauth.js');
+      const result = await loginNextAuth(
+        baseUrl,
+        { kind: 'nextauth', fields: { email: 'email', password: 'password' } },
+        { email: 'owner@test.local', password: 'pw' }
+      );
+      expect(result.ok).toBe(true);
+      expect(
+        result.cookies.some((c) => c.startsWith('next-auth.session-token='))
+      ).toBe(true);
+    } finally {
+      close();
+    }
+  });
+
+  it('honors explicit cookieName (does not detect a mismatched server cookie)', async () => {
+    const { baseUrl, close } = await createNextAuthLikeServer(
+      'authjs.session-token'
+    );
+    try {
+      const { loginNextAuth } = await import('./nextauth.js');
+      const result = await loginNextAuth(
+        baseUrl,
+        {
+          kind: 'nextauth',
+          cookieName: 'next-auth.session-token',
+          fields: { email: 'email', password: 'password' },
+        },
+        { email: 'owner@test.local', password: 'pw' }
+      );
+      // Server set 'authjs.session-token'; explicit cookieName is the v4 name,
+      // which is NOT present in the response.
+      const matchedExplicit = result.cookies.some(
+        (c) =>
+          c.startsWith('next-auth.session-token=') ||
+          c.startsWith('__Secure-next-auth.session-token=')
+      );
+      expect(matchedExplicit).toBe(false);
+    } finally {
+      close();
+    }
+  });
+});

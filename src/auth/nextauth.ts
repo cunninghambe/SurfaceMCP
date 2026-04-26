@@ -6,7 +6,10 @@ type LoginResult = { ok: boolean; cookies: string[]; error?: string };
 
 const DEFAULT_CSRF_PATH = '/api/auth/csrf';
 const DEFAULT_CALLBACK_PATH = '/api/auth/callback/credentials';
-const DEFAULT_COOKIE_NAME = 'next-auth.session-token';
+// Auth.js v5 default. v4 used 'next-auth.session-token'. When auth.cookieName
+// is unset, both v5 and v4 names are detected so the same config works against
+// either upstream.
+const DEFAULT_COOKIE_NAMES = ['authjs.session-token', 'next-auth.session-token'];
 
 export async function loginNextAuth(
   baseUrl: string,
@@ -70,10 +73,17 @@ export async function loginNextAuth(
     sessionCookies = callbackRes.headers.getSetCookie?.() ?? [];
     const allCookies = [...csrfCookies, ...sessionCookies];
 
-    // Look for session cookie (with or without __Secure- prefix)
-    const cookieName = auth.cookieName ?? DEFAULT_COOKIE_NAME;
+    // Look for session cookie (with or without __Secure- prefix). When the
+    // user provides cookieName explicitly, only that name is checked. When
+    // unset, both Auth.js v5 (authjs.session-token) and v4 (next-auth...)
+    // are accepted so a single config works across upstream versions.
+    const candidateNames = auth.cookieName
+      ? [auth.cookieName]
+      : DEFAULT_COOKIE_NAMES;
     const hasSession = allCookies.some((c) =>
-      c.startsWith(`${cookieName}=`) || c.startsWith(`__Secure-${cookieName}=`)
+      candidateNames.some(
+        (name) => c.startsWith(`${name}=`) || c.startsWith(`__Secure-${name}=`)
+      )
     );
 
     if (!hasSession && callbackRes.status >= 400) {
