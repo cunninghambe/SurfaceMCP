@@ -1,5 +1,6 @@
 import { Project, Node, SyntaxKind, type SourceFile } from 'ts-morph';
 import { zodToJsonSchema } from 'zod-to-json-schema';
+import { type ZodSchema } from 'zod';
 import type { JsonSchema2020, InputSchemaConfidence } from '../../types.js';
 
 type SchemaResult = {
@@ -172,8 +173,7 @@ function applyNumberConstraints(s: JsonSchema2020, chain: string): void {
  * This is the authoritative path; the text parser above is fallback.
  */
 export function zodSchemaToJsonSchema(
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  zodSchema: any
+  zodSchema: ZodSchema<unknown>
 ): JsonSchema2020 {
   const result = zodToJsonSchema(zodSchema, {
     target: 'jsonSchema2019-09',
@@ -196,8 +196,8 @@ export async function tryImportZodSchema(
     const schemaNames = ['schema', 'bodySchema', 'inputSchema', 'requestSchema', 'Schema'];
     for (const name of schemaNames) {
       const candidate = mod[name];
-      if (candidate && typeof candidate === 'object' && '_def' in candidate) {
-        const jsonSchema = zodSchemaToJsonSchema(candidate);
+      if (candidate && typeof candidate === 'object' && '_def' in candidate && 'parse' in candidate) {
+        const jsonSchema = zodSchemaToJsonSchema(candidate as ZodSchema<unknown>);
         return { schema: jsonSchema, confidence: 'introspected' };
       }
     }
