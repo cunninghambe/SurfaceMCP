@@ -1,0 +1,16 @@
+{
+  "surfaces": {
+    "web": {
+      "routes": [
+        "GET /api/posts",
+        "POST /api/posts"
+      ]
+    },
+    "api": {
+      "routes": [
+        "GET /api/health",
+        "POST /api/data"
+      ]
+    }
+  }
+}

@@ -1,0 +1,67 @@
+{
+  "openapi": "3.1.0",
+  "info": { "title": "Fixture FastAPI App", "version": "0.1.0" },
+  "paths": {
+    "/api/users": {
+      "get": {
+        "operationId": "list_users",
+        "summary": "List users",
+        "responses": { "200": { "description": "OK" } }
+      },
+      "post": {
+        "operationId": "create_user",
+        "summary": "Create user",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "name": { "type": "string", "minLength": 1, "maxLength": 100 },
+                  "email": { "type": "string", "format": "email" },
+                  "age": { "type": "integer", "minimum": 0, "maximum": 120 }
+                },
+                "required": ["name", "email"]
+              }
+            }
+          }
+        },
+        "responses": { "201": { "description": "Created" } }
+      }
+    },
+    "/api/users/{user_id}": {
+      "get": {
+        "operationId": "get_user",
+        "summary": "Get user",
+        "parameters": [{ "in": "path", "name": "user_id", "required": true, "schema": { "type": "integer" } }],
+        "responses": { "200": { "description": "OK" } }
+      },
+      "put": {
+        "operationId": "update_user",
+        "summary": "Update user",
+        "parameters": [{ "in": "path", "name": "user_id", "required": true, "schema": { "type": "integer" } }],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "name": { "type": "string" },
+                  "email": { "type": "string", "format": "email" }
+                }
+              }
+            }
+          }
+        },
+        "responses": { "200": { "description": "OK" } }
+      },
+      "delete": {
+        "operationId": "delete_user",
+        "summary": "Delete user",
+        "parameters": [{ "in": "path", "name": "user_id", "required": true, "schema": { "type": "integer" } }],
+        "responses": { "200": { "description": "OK" } }
+      }
+    }
+  }
+}

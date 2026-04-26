@@ -1,0 +1,5 @@
+{
+  "name": "monorepo-api",
+  "private": true,
+  "dependencies": { "express": "5.2.1", "zod": "3.25.76" }
+}

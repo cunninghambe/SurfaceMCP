@@ -1,0 +1,9 @@
+{
+  "routes": [
+    "GET /api/items/",
+    "POST /api/items/",
+    "GET /api/items/:pk",
+    "PUT /api/items/:pk",
+    "DELETE /api/items/:pk"
+  ]
+}
