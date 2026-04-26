@@ -1,0 +1,33 @@
+{
+  "surfaces": [
+    {
+      "name": "web",
+      "stack": "nextjs",
+      "root": ".",
+      "baseUrl": "http://localhost:3000",
+      "port": 3102,
+      "launchDevCommand": "npm run dev",
+      "watchPaths": ["app", "pages", "src"],
+      "watchIgnore": [],
+      "auth": {
+        "kind": "nextauth",
+        "csrfPath": "/api/auth/csrf",
+        "callbackPath": "/api/auth/callback/credentials",
+        "cookieName": "next-auth.session-token",
+        "fields": { "email": "email", "password": "password" }
+      },
+      "roles": [
+        {
+          "name": "owner",
+          "credentials": {
+            "email": "owner@test.local",
+            "password": "$env:OWNER_PASSWORD"
+          }
+        }
+      ],
+      "excludedRoutes": [],
+      "externalIntegrations": [],
+      "_suggestedExternalIntegrations": []
+    }
+  ]
+}

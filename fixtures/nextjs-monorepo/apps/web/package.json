@@ -1,0 +1,5 @@
+{
+  "name": "monorepo-web",
+  "private": true,
+  "dependencies": { "next": "15.0.0", "zod": "3.25.76" }
+}
