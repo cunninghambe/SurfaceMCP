@@ -1,0 +1,27 @@
+{
+  "surfaces": [
+    {
+      "name": "web",
+      "stack": "nextjs",
+      "root": ".",
+      "baseUrl": "http://127.0.0.1:3010",
+      "port": 3102,
+      "launchDevCommand": "npm run dev",
+      "watchPaths": [
+        "app",
+        "pages",
+        "src"
+      ],
+      "watchIgnore": [],
+      "auth": {
+        "kind": "none"
+      },
+      "roles": [
+        { "name": "anonymous", "credentials": {} }
+      ],
+      "excludedRoutes": [],
+      "externalIntegrations": [],
+      "_suggestedExternalIntegrations": []
+    }
+  ]
+}
