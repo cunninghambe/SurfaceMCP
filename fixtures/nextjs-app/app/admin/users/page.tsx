@@ -1,5 +1,3 @@
-'use server';
-
 async function createUser(formData: FormData) {
   'use server';
   const name = formData.get('name');
