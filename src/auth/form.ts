@@ -48,14 +48,19 @@ export async function loginForm(
   }
 
   const loginUrl = `${baseUrl.replace(/\/$/, '')}${auth.loginPath}`;
+  const useJsonBody = auth.bodyFormat === 'json';
   const headers: Record<string, string> = {
-    'Content-Type': 'application/x-www-form-urlencoded',
+    'Content-Type': useJsonBody
+      ? 'application/json'
+      : 'application/x-www-form-urlencoded',
   };
   if (preLoginCookies.length > 0) {
     headers['Cookie'] = preLoginCookies.join('; ');
   }
 
-  const body = new URLSearchParams(fields).toString();
+  const body = useJsonBody
+    ? JSON.stringify(fields)
+    : new URLSearchParams(fields).toString();
   const res = await fetch(loginUrl, {
     method: auth.loginMethod,
     headers,

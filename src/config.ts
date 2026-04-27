@@ -25,6 +25,9 @@ const AuthConfigSchema = z.discriminatedUnion('kind', [
     loginMethod: z.enum(['POST', 'GET']),
     loginPath: z.string(),
     loginFields: z.record(z.string()),
+    /** Encoding for the request body. Defaults to 'form' (application/x-www-form-urlencoded).
+     * Use 'json' for SaaS apps whose login endpoints expect a JSON payload. */
+    bodyFormat: z.enum(['form', 'json']).optional(),
     successCheck: SuccessCheckSchema,
   }),
   z.object({
