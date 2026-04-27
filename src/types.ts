@@ -65,6 +65,7 @@ export type AuthConfig =
       loginMethod: 'POST' | 'GET';
       loginPath: string;
       loginFields: Record<string, string>;
+      bodyFormat?: 'form' | 'json';
       successCheck: SuccessCheck;
     }
   | {
