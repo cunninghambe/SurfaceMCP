@@ -7,7 +7,22 @@
     "DELETE /api/users/:id",
     "GET /api/products",
     "POST /api/journal-entries",
-    "POST /api/orders"
+    "POST /api/orders",
+    "POST /api/conditional-404"
   ],
-  "serverActions": []
+  "serverActions": [],
+  "perRoute": {
+    "POST /api/users": { "inputSchemaConfidence": "introspected" },
+    "PUT /api/users/:id": { "inputSchemaConfidence": "introspected" },
+    "POST /api/journal-entries": { "inputSchemaConfidence": "partial", "requiredFields": ["amount", "memo"] },
+    "POST /api/orders": { "inputSchemaConfidence": "partial", "requiredFields": ["amount"] },
+    "POST /api/conditional-404": { "inputSchemaConfidence": "unknown" }
+  },
+  "suggestedExternalIntegrations": {
+    "include": ["app/api/orders/route.ts"],
+    "exclude": [
+      "app/policies/privacy/page.tsx",
+      "app/components/CheckoutButton.tsx"
+    ]
+  }
 }
