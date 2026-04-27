@@ -1,0 +1,24 @@
+{
+  "routes": [
+    "GET /api/v1/health",
+    "POST /api/v1/trades",
+    "POST /api/v1/trades/batch",
+    "GET /api/v1/trades/:trade_id",
+    "POST /api/v1/summaries/daily",
+    "POST /mcp",
+    "GET /mcp",
+    "DELETE /mcp",
+    "GET /mcp/sub/list"
+  ],
+  "mustNotContain": [
+    "GET /health",
+    "POST /trades",
+    "POST /trades/batch",
+    "GET /trades/:trade_id",
+    "POST /summaries/daily",
+    "GET /sub/list",
+    "POST /",
+    "GET /",
+    "DELETE /"
+  ]
+}
