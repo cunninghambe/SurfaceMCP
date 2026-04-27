@@ -291,6 +291,7 @@ function registerMetaTools(
         pageRevision: pc.revision,
         capabilities: {
           listPages: surface.stack === 'vite',
+          crawlSeed: surface.stack === 'vite',
         },
       });
     }

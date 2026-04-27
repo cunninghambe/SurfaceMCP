@@ -1,0 +1,13 @@
+{
+  "surfaces": [
+    {
+      "name": "vite-routerless",
+      "stack": "vite",
+      "root": ".",
+      "baseUrl": "http://localhost:5174",
+      "port": 3121,
+      "auth": { "kind": "none" },
+      "roles": []
+    }
+  ]
+}

@@ -51,6 +51,8 @@ export type ToolCatalog = {
 
 export type Stack = 'nextjs' | 'express' | 'fastapi' | 'django' | 'openapi' | 'vite';
 
+export type PageSource = 'static' | 'crawl_seed';
+
 export type Page = {
   /**
    * URL path as authored (e.g. '/', '/admin/users', '/users/:id').
@@ -80,6 +82,15 @@ export type Page = {
    * Project-root-relative.
    */
   declaredAt: { file: string; line: number };
+  /**
+   * How this page entry was produced.
+   * - 'static': extracted from source code (default; backward-compatible).
+   * - 'crawl_seed': emitted as a starting URL for runtime crawl-based discovery.
+   *   Consumer (e.g. BugHunter) is expected to navigate the route, walk the DOM,
+   *   follow same-origin links, and recursively discover more pages.
+   * Optional for backward-compat: missing/undefined ≡ 'static'.
+   */
+  source?: PageSource;
 };
 
 export type PageCatalog = {
@@ -98,7 +109,8 @@ export type PageSkip = {
     | 'duplicate_route'
     | 'unresolved_component'
     | 'unresolved_lazy_import'
-    | 'tab_state_routing_suspected';
+    | 'tab_state_routing_suspected'
+    | 'crawl_seed_emitted';
   detail?: string;
   declaredAt?: { file: string; line: number };
 };

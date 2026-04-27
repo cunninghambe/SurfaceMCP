@@ -14,7 +14,7 @@ export type SpawnedServer = {
     baseUrl: string;
     toolRevision: number;
     pageRevision: number;
-    capabilities: { listPages: boolean };
+    capabilities: { listPages: boolean; crawlSeed?: boolean };
   }>;
   callTool: (name: string, args: Record<string, unknown>) => Promise<unknown>;
   getEffectiveConfig: () => Promise<{
@@ -152,7 +152,7 @@ export async function startSurfaceMcpServer(cwd: string): Promise<SpawnedServer>
         baseUrl: string;
         toolRevision: number;
         pageRevision: number;
-        capabilities: { listPages: boolean };
+        capabilities: { listPages: boolean; crawlSeed?: boolean };
       }>(baseUrl, 'surface_describe_self', {});
     },
     callTool: (name, args) => mcpCall(baseUrl, name, args),
