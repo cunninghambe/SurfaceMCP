@@ -1,18 +1,33 @@
 import { readdirSync, existsSync, readFileSync } from 'node:fs';
 import { resolve, relative } from 'node:path';
 import { createHash } from 'node:crypto';
-import { Project, SyntaxKind, Node } from 'ts-morph';
+import { Project, type SourceFile } from 'ts-morph';
 import type { ToolMeta } from '../../types.js';
+import {
+  classifyFileDirective,
+  collectPatternA,
+  collectPatternB,
+  collectPatternC,
+} from './server-actions-collect.js';
 
-// TODO(spec): Server action discovery is form-action only (v0.1).
-// Closure-bound RPC actions deferred to v0.2.
+export type { ServerActionKind, ServerActionParam, ServerAction } from './server-actions-collect.js';
+import type { ServerAction, ServerActionKind } from './server-actions-collect.js';
 
-function toolId(actionName: string, pagePath: string): string {
-  return createHash('sha1').update(`serveraction:${actionName}:${pagePath}`).digest('hex').slice(0, 12);
+// ─── Utility ─────────────────────────────────────────────────────────────────
+
+function computeToolId(name: string, definitionFile: string): string {
+  return createHash('sha1')
+    .update(`serveraction:${name}:${definitionFile}`)
+    .digest('hex')
+    .slice(0, 12);
 }
 
 function sanitizePath(p: string): string {
-  return p.replace(/\//g, '_').replace(/[^a-z0-9_]/gi, '_').replace(/_+/g, '_').replace(/^_|_$/g, '');
+  return p
+    .replace(/\//g, '_')
+    .replace(/[^a-z0-9_]/gi, '_')
+    .replace(/_+/g, '_')
+    .replace(/^_|_$/g, '');
 }
 
 function walkDir(dir: string, files: string[] = []): string[] {
@@ -21,110 +36,135 @@ function walkDir(dir: string, files: string[] = []): string[] {
     const full = resolve(dir, entry.name);
     if (entry.isDirectory()) {
       walkDir(full, files);
-    } else if (/\.(ts|tsx|js|jsx)$/.test(entry.name) && !entry.name.includes('.test.') && !entry.name.includes('.spec.')) {
+    } else if (
+      /\.(ts|tsx|js|jsx)$/.test(entry.name) &&
+      !entry.name.endsWith('.d.ts') &&
+      !entry.name.includes('.test.') &&
+      !entry.name.includes('.spec.')
+    ) {
       files.push(full);
     }
   }
   return files;
 }
 
-type FormFieldInfo = {
-  name: string;
-  type: string;
+function isApiPath(relFile: string): boolean {
+  return (
+    relFile.startsWith('app/api/') ||
+    relFile.startsWith('src/app/api/') ||
+    relFile.startsWith('pages/api/') ||
+    relFile.startsWith('src/pages/api/')
+  );
+}
+
+function readFileSafe(filePath: string): string | null {
+  try {
+    return readFileSync(filePath, 'utf-8');
+  } catch {
+    return null;
+  }
+}
+
+// ─── Merge logic ──────────────────────────────────────────────────────────────
+
+const KIND_PRIORITY: Record<ServerActionKind, number> = {
+  'file-level': 2,
+  'function-level': 1,
+  'form-bound': 0,
 };
 
-function extractFormFields(content: string): FormFieldInfo[] {
-  const fields: FormFieldInfo[] = [];
-  // Match <input name="fieldName" type="text" />
-  const inputPattern = /<input[^>]+name=["'](\w+)["'][^>]*(?:type=["'](\w+)["'])?[^>]*\/?>/g;
-  let match: RegExpExecArray | null;
-  while ((match = inputPattern.exec(content)) !== null) {
-    fields.push({ name: match[1], type: match[2] ?? 'text' });
+function mergeInto(byKey: Map<string, ServerAction>, action: ServerAction): void {
+  const key = `${action.definitionFile}:${action.name}`;
+  const existing = byKey.get(key);
+  if (!existing || KIND_PRIORITY[action.kind] > KIND_PRIORITY[existing.kind]) {
+    byKey.set(key, action);
   }
-  return fields;
 }
 
-function formFieldsToSchema(fields: FormFieldInfo[]): ToolMeta['inputSchema'] {
-  if (fields.length === 0) {
-    return { type: 'object', additionalProperties: true };
+// ─── Per-file processing ──────────────────────────────────────────────────────
+
+function processFileForAB(
+  filePath: string,
+  root: string,
+  project: Project,
+  byKey: Map<string, ServerAction>,
+): void {
+  const relFile = relative(root, filePath);
+  if (isApiPath(relFile)) return;
+  const sf = project.getSourceFile(filePath);
+  if (!sf) return;
+  const content = readFileSafe(filePath);
+  if (content === null) return;
+
+  const fileDirective = classifyFileDirective(sf);
+  if (fileDirective === 'use-server') {
+    for (const action of collectPatternA(sf, relFile, content)) mergeInto(byKey, action);
+  } else if (fileDirective === 'none') {
+    for (const action of collectPatternB(sf, relFile, content)) mergeInto(byKey, action);
   }
-
-  const properties: Record<string, { type: string; format?: string }> = {};
-  const required: string[] = [];
-
-  for (const field of fields) {
-    const prop: { type: string; format?: string } = { type: 'string' };
-    if (field.type === 'number') prop.type = 'number';
-    else if (field.type === 'email') { prop.type = 'string'; prop.format = 'email'; }
-    else if (field.type === 'checkbox') prop.type = 'boolean';
-    properties[field.name] = prop;
-    required.push(field.name);
-  }
-
-  return { type: 'object', properties, required };
 }
+
+function processFileForC(
+  filePath: string,
+  root: string,
+  project: Project,
+  byKey: Map<string, ServerAction>,
+): void {
+  const relFile = relative(root, filePath);
+  if (isApiPath(relFile)) return;
+  if (!/(?:page|layout)\.(ts|tsx|js|jsx)$/.test(relFile)) return;
+  const sf = project.getSourceFile(filePath) as SourceFile | undefined;
+  if (!sf) return;
+  const content = readFileSafe(filePath);
+  if (content === null) return;
+  for (const action of collectPatternC(sf, relFile, content, byKey)) mergeInto(byKey, action);
+}
+
+// ─── Discovery entry point ────────────────────────────────────────────────────
+
+async function findServerActionDefinitions(root: string): Promise<ServerAction[]> {
+  const sourceRoots = ['app', 'src/app', 'pages', 'src/pages'].map((r) => resolve(root, r));
+  const allFiles: string[] = [];
+  for (const dir of sourceRoots) walkDir(dir, allFiles);
+
+  const project = new Project({ useInMemoryFileSystem: false });
+  for (const f of allFiles) project.addSourceFileAtPath(f);
+
+  const byKey = new Map<string, ServerAction>();
+  for (const f of allFiles) processFileForAB(f, root, project, byKey);
+  for (const f of allFiles) processFileForC(f, root, project, byKey);
+
+  return [...byKey.values()];
+}
+
+// ─── ToolMeta mapping ─────────────────────────────────────────────────────────
+
+function deriveServerActionPath(action: ServerAction): string {
+  if (action.kind === 'form-bound') {
+    return `/${action.definitionFile.replace(/\\/g, '/').replace(/\/page\.(ts|tsx|js|jsx)$/, '')}`;
+  }
+  return `/__action__/${action.definitionFile.replace(/\.(t|j)sx?$/, '')}/${action.name}`;
+}
+
+function mapServerActionsToToolMeta(actions: ServerAction[]): ToolMeta[] {
+  return actions.map((action) => ({
+    name: `serveraction_${action.name}__${sanitizePath(action.definitionFile)}`,
+    toolId: computeToolId(action.name, action.definitionFile),
+    method: 'POST',
+    path: deriveServerActionPath(action),
+    inputSchema: action.schema,
+    inputSchemaConfidence: action.schemaConfidence,
+    sideEffectClass: 'mutating',
+    sourceFile: action.definitionFile,
+    sourceLine: action.definitionLine,
+    sourceFunctionName: action.name,
+    isServerAction: true,
+  }));
+}
+
+// ─── Public entry point ───────────────────────────────────────────────────────
 
 export async function extractServerActions(root: string): Promise<ToolMeta[]> {
-  const tools: ToolMeta[] = [];
-  const appDir = resolve(root, 'app');
-
-  if (!existsSync(appDir)) return tools;
-
-  const files = walkDir(appDir);
-  const pageFiles = files.filter((f) =>
-    /page\.(ts|tsx|js|jsx)$/.test(f) || /layout\.(ts|tsx|js|jsx)$/.test(f)
-  );
-
-  for (const pageFile of pageFiles) {
-    let content: string;
-    try {
-      content = readFileSync(pageFile, 'utf-8');
-    } catch {
-      continue;
-    }
-
-    // Only process files that use server actions in <form action={fn}> pattern
-    if (!/<form\s[^>]*action=\{/.test(content)) continue;
-
-    try {
-      const project = new Project({ useInMemoryFileSystem: false });
-      const sf = project.addSourceFileAtPath(pageFile);
-
-      // Find JSX form elements with action={fn}
-      const jsxAttrs = sf.getDescendantsOfKind(SyntaxKind.JsxAttribute);
-      for (const attr of jsxAttrs) {
-        if (attr.getNameNode().getText() !== 'action') continue;
-        const init = attr.getInitializer();
-        if (!Node.isJsxExpression(init)) continue;
-
-        const expr = init.getExpression();
-        if (!expr) continue;
-        const actionName = expr.getText().replace(/^props\./, '');
-
-        // Find the parent form element to extract sibling inputs
-        const formFields = extractFormFields(content);
-        const schema = formFieldsToSchema(formFields);
-
-        const pagePath = relative(root, pageFile);
-        const sanitizedPage = sanitizePath(pagePath);
-
-        tools.push({
-          name: `serveraction_${actionName}__${sanitizedPage}`,
-          toolId: toolId(actionName, pagePath),
-          method: 'POST',
-          path: `/${pagePath.replace(/\\/g, '/').replace(/\/page\.(ts|tsx|js|jsx)$/, '')}`,
-          inputSchema: schema,
-          inputSchemaConfidence: 'inferred',
-          sideEffectClass: 'mutating',
-          sourceFile: relative(root, pageFile),
-          sourceLine: 1,
-          isServerAction: true,
-        });
-      }
-    } catch {
-      // skip if AST parse fails
-    }
-  }
-
-  return tools;
+  const actions = await findServerActionDefinitions(root);
+  return mapServerActionsToToolMeta(actions);
 }
