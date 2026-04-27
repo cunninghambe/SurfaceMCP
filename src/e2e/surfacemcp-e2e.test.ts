@@ -2,6 +2,87 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { startSurfaceMcpServer, stopAll, type SpawnedServer } from './helpers/spawn.js';
 import { loadFixtureMustDiscover } from './helpers/fixture-load.js';
 import * as path from 'node:path';
+import { readFileSync } from 'node:fs';
+
+describe('SurfaceMCP e2e against fixtures/vite-app', () => {
+  let server: SpawnedServer;
+  const fixtureRoot = path.resolve(import.meta.dirname, '../../fixtures/vite-app');
+
+  type MustDiscoverPage = {
+    route: string;
+    sourceFile: string;
+    componentName: string;
+    lazy: boolean;
+    dynamicParams: string[];
+  };
+  const mustDiscover = JSON.parse(
+    readFileSync(path.resolve(fixtureRoot, 'MUST_DISCOVER.json'), 'utf-8')
+  ) as { pages: MustDiscoverPage[] };
+
+  beforeAll(async () => {
+    server = await startSurfaceMcpServer(fixtureRoot);
+  }, 30_000);
+
+  afterAll(async () => {
+    await stopAll();
+  });
+
+  it('surface_describe_self returns stack: vite and capabilities.listPages: true', async () => {
+    const result = await server.describeSelf();
+    expect(result.stack).toBe('vite');
+    expect(result.capabilities.listPages).toBe(true);
+  });
+
+  it('surface_list_pages returns exactly the six pages from MUST_DISCOVER (presence + absence)', async () => {
+    const result = await server.listPages();
+    const pages = result.pages;
+
+    expect(pages.length, `expected 6 pages, got ${pages.length}: ${JSON.stringify(pages.map(p => p.route))}`).toBe(6);
+
+    const byRoute = new Map(pages.map(p => [p.route, p]));
+    const expectedRoutes = new Set(mustDiscover.pages.map(p => p.route));
+    const discoveredRoutes = new Set(pages.map(p => p.route));
+
+    // Presence
+    for (const entry of mustDiscover.pages) {
+      expect(byRoute.has(entry.route), `Missing route: ${entry.route}`).toBe(true);
+      const page = byRoute.get(entry.route)!;
+      expect(page.lazy, `lazy mismatch for ${entry.route}`).toBe(entry.lazy);
+      expect(page.componentName, `componentName mismatch for ${entry.route}`).toBe(entry.componentName);
+    }
+
+    // Absence
+    const extras = [...discoveredRoutes].filter(r => !expectedRoutes.has(r));
+    expect(extras, `Unexpected routes: ${JSON.stringify(extras)}`).toEqual([]);
+  });
+
+  it('surface_list_pages with filter lazy:true returns only lazy entries', async () => {
+    const result = await server.listPages({ lazy: true });
+    expect(result.pages.length).toBeGreaterThan(0);
+    for (const p of result.pages) {
+      expect(p.lazy).toBe(true);
+    }
+    // /about is the only lazy route in the fixture
+    expect(result.pages.map(p => p.route)).toContain('/about');
+  });
+
+  it('surface_list_pages with filter pathPrefix:/admin returns only admin routes', async () => {
+    const result = await server.listPages({ pathPrefix: '/admin' });
+    const routes = result.pages.map(p => p.route);
+    expect(routes).toContain('/admin');
+    expect(routes).toContain('/admin/users');
+    expect(routes).toContain('/admin/settings');
+    // No non-admin routes
+    for (const r of routes) {
+      expect(r.startsWith('/admin'), `Route ${r} should start with /admin`).toBe(true);
+    }
+  });
+
+  it('surface_list_tools returns empty (no API tools in vite fixture)', async () => {
+    const tools = await server.listTools();
+    expect(tools).toEqual([]);
+  });
+});
 
 describe('SurfaceMCP e2e against fixtures/nextjs-app', () => {
   let server: SpawnedServer;

@@ -53,7 +53,7 @@ const RoleConfigSchema = z.object({
 
 const SurfaceConfigSchema = z.object({
   name: z.string().min(1),
-  stack: z.enum(['nextjs', 'express', 'fastapi', 'django', 'openapi']),
+  stack: z.enum(['nextjs', 'express', 'fastapi', 'django', 'openapi', 'vite']),
   root: z.string(),
   baseUrl: z.string().url(),
   port: z.number().int().min(3102).max(3199),

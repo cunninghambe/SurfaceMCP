@@ -1,0 +1,21 @@
+{
+  "surfaces": [
+    {
+      "name": "web",
+      "stack": "vite",
+      "root": ".",
+      "baseUrl": "http://localhost:5173",
+      "port": 3110,
+      "launchDevCommand": "npm run dev",
+      "watchPaths": ["src"],
+      "watchIgnore": [],
+      "auth": { "kind": "none" },
+      "roles": [
+        { "name": "anonymous", "credentials": {} }
+      ],
+      "excludedRoutes": [],
+      "externalIntegrations": [],
+      "_suggestedExternalIntegrations": []
+    }
+  ]
+}

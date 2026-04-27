@@ -1,5 +1,6 @@
 import type { Stack } from '../types.js';
 import { isNextjs } from './nextjs.js';
+import { isVite } from './vite.js';
 import { isDjango } from './django.js';
 import { isExpress } from './express.js';
 import { isFastApi } from './fastapi.js';
@@ -11,6 +12,7 @@ import { isOpenApi } from './openapi.js';
  */
 export function detectStack(root: string): Stack | null {
   if (isNextjs(root)) return 'nextjs';
+  if (isVite(root)) return 'vite';       // before express — a Vite app may have express as dev dep
   if (isDjango(root)) return 'django';
   if (isExpress(root)) return 'express';
   if (isFastApi(root)) return 'fastapi';

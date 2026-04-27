@@ -1,17 +1,23 @@
-import type { ToolMeta, ToolCatalog, SurfaceConfig } from '../types.js';
+import type { ToolMeta, ToolCatalog, PageCatalog, SurfaceConfig } from '../types.js';
 import { extractNextjsRoutes } from '../extract/nextjs/routes.js';
 import { extractServerActions } from '../extract/nextjs/server-actions.js';
 import { extractExpressRoutes } from '../extract/express/static.js';
 import { fetchFastApiSchema } from '../extract/fastapi/openapi-fetch.js';
 import { extractDjangoRoutes } from '../extract/django/ast-walk.js';
 import { extractOpenApiRoutes } from '../extract/openapi/parse.js';
+import { extractPagesForStack } from '../extract/pages/index.js';
 import { classifyByCallGraph } from '../classify/call-graph.js';
 import { log } from '../log.js';
 
 let catalog: ToolCatalog = { revision: 0, tools: [] };
+let pageCatalog: PageCatalog = { revision: 0, pages: [] };
 
 export function getCatalog(): ToolCatalog {
   return catalog;
+}
+
+export function getPageCatalog(): PageCatalog {
+  return pageCatalog;
 }
 
 export function getToolByName(name: string): ToolMeta | undefined {
@@ -74,4 +80,23 @@ export async function regenerateCatalog(surface: SurfaceConfig, root: string): P
   };
 
   log.info({ revision: catalog.revision, count: tools.length }, 'catalog updated');
+
+  // Regenerate page catalog for stacks that support it
+  await regeneratePageCatalog(surface, root);
+}
+
+export async function regeneratePageCatalog(surface: SurfaceConfig, root: string): Promise<void> {
+  try {
+    const { pages, skips } = await extractPagesForStack(surface.stack, root);
+    pageCatalog = {
+      revision: pageCatalog.revision + 1,
+      pages,
+    };
+    if (skips.length > 0) {
+      log.info({ skips }, 'page extraction skips');
+    }
+    log.info({ revision: pageCatalog.revision, count: pages.length }, 'page catalog updated');
+  } catch (err) {
+    log.error({ err }, 'page extraction error — page catalog unchanged');
+  }
 }

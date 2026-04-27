@@ -1,12 +1,21 @@
 import { spawn, type ChildProcess } from 'node:child_process';
 import { getFreePort } from './free-port.js';
 import { detectExternalIntegrations } from '../../classify/grep-init.js';
-import type { ToolMeta } from '../../types.js';
+import type { ToolMeta, Page } from '../../types.js';
 
 export type SpawnedServer = {
   baseUrl: string;
   port: number;
   listTools: () => Promise<ToolMeta[]>;
+  listPages: (filter?: { pathPrefix?: string; lazy?: boolean }) => Promise<{ revision: number; pages: Page[] }>;
+  describeSelf: () => Promise<{
+    name: string;
+    stack: string;
+    baseUrl: string;
+    toolRevision: number;
+    pageRevision: number;
+    capabilities: { listPages: boolean };
+  }>;
   callTool: (name: string, args: Record<string, unknown>) => Promise<unknown>;
   getEffectiveConfig: () => Promise<{
     surfaces: Array<{ _suggestedExternalIntegrations: string[] }>;
@@ -132,6 +141,19 @@ export async function startSurfaceMcpServer(cwd: string): Promise<SpawnedServer>
         {}
       );
       return result.tools;
+    },
+    listPages: async (filter?) => {
+      return mcpCall<{ revision: number; pages: Page[] }>(baseUrl, 'surface_list_pages', { filter });
+    },
+    describeSelf: async () => {
+      return mcpCall<{
+        name: string;
+        stack: string;
+        baseUrl: string;
+        toolRevision: number;
+        pageRevision: number;
+        capabilities: { listPages: boolean };
+      }>(baseUrl, 'surface_describe_self', {});
     },
     callTool: (name, args) => mcpCall(baseUrl, name, args),
     getEffectiveConfig: async () => {
