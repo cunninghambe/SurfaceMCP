@@ -1,0 +1,18 @@
+# Build / runtime artefacts
+.next/
+node_modules/
+
+# BugHunter run artefacts
+.bughunter/
+
+# pm2 ecosystem (user-specific paths)
+ecosystem.config.cjs
+
+# Local env overrides
+.env
+.env.local
+.env.example
+
+# OS / editor noise
+.DS_Store
+*.log
