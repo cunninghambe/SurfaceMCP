@@ -10,7 +10,32 @@
     "POST /api/orders",
     "POST /api/conditional-404"
   ],
-  "serverActions": [],
+  "serverActions": [
+    {
+      "name": "createOrder",
+      "kind": "file-level",
+      "definitionFile": "app/actions/orders.ts",
+      "toolId": "3aabc90b1d5d",
+      "inputSchemaConfidence": "introspected",
+      "requiredFields": ["productId", "qty"]
+    },
+    {
+      "name": "archiveOrder",
+      "kind": "function-level",
+      "definitionFile": "app/admin/inline-action/page.tsx",
+      "toolId": "11b684e04a34",
+      "inputSchemaConfidence": "introspected",
+      "requiredFields": ["value"]
+    },
+    {
+      "name": "createUser",
+      "kind": "form-bound",
+      "definitionFile": "app/admin/users/page.tsx",
+      "toolId": "997c1db5bd0b",
+      "inputSchemaConfidence": "inferred",
+      "requiredFields": ["name", "email"]
+    }
+  ],
   "perRoute": {
     "POST /api/users": { "inputSchemaConfidence": "introspected" },
     "PUT /api/users/:id": { "inputSchemaConfidence": "introspected" },

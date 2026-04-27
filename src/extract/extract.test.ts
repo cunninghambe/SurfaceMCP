@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { extractNextjsRoutes } from './nextjs/routes.js';
+import { extractServerActions } from './nextjs/server-actions.js';
 import { extractExpressRoutes } from './express/static.js';
 import { extractDjangoRoutes } from './django/ast-walk.js';
 import { extractOpenApiRoutes } from './openapi/parse.js';
@@ -187,6 +188,20 @@ describe('openapi route extraction', () => {
     const postUsers = tools.find((t) => t.method === 'POST' && t.path === '/api/users');
     expect(postUsers?.inputSchema.properties?.age?.minimum).toBe(0);
     expect(postUsers?.inputSchema.properties?.age?.maximum).toBe(120);
+  });
+});
+
+describe('nextjs-app server-action extraction', () => {
+  it('discovers all must-discover server actions', async () => {
+    const root = resolve(FIXTURES, 'nextjs-app');
+    const tools = await extractServerActions(root);
+    const must = loadMustDiscover('nextjs-app');
+    const byId = new Map(tools.map((t) => [t.toolId, t]));
+    for (const expected of (must as { serverActions?: Array<{ toolId: string; inputSchemaConfidence: string }> }).serverActions ?? []) {
+      const t = byId.get(expected.toolId);
+      expect(t, `missing server action toolId=${expected.toolId}`).toBeDefined();
+      expect(t!.inputSchemaConfidence).toBe(expected.inputSchemaConfidence);
+    }
   });
 });
 
