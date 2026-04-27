@@ -7,9 +7,18 @@ const PerRouteAssertionSchema = z.object({
   requiredFields: z.array(z.string()).optional(),
 });
 
+const ServerActionAssertionSchema = z.object({
+  name: z.string(),
+  kind: z.enum(['file-level', 'function-level', 'form-bound']),
+  definitionFile: z.string(),
+  toolId: z.string(),
+  inputSchemaConfidence: z.enum(['introspected', 'inferred', 'partial', 'unknown']),
+  requiredFields: z.array(z.string()).optional(),
+});
+
 const MustDiscoverSchema = z.object({
   routes: z.array(z.string()),
-  serverActions: z.array(z.string()),
+  serverActions: z.array(ServerActionAssertionSchema),
   perRoute: z.record(PerRouteAssertionSchema).optional(),
   suggestedExternalIntegrations: z.object({
     include: z.array(z.string()),
