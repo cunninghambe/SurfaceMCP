@@ -2,7 +2,7 @@ import { readdirSync, existsSync } from 'node:fs';
 import { resolve, relative } from 'node:path';
 import { createHash } from 'node:crypto';
 import type { ToolMeta, SideEffectClass } from '../../types.js';
-import { tryImportZodSchema } from './schemas.js';
+import { tryImportZodSchema, extractManualValidationSchemaFromFile } from './schemas.js';
 
 const HTTP_METHODS = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD', 'OPTIONS'] as const;
 type HttpMethod = typeof HTTP_METHODS[number];
@@ -90,7 +90,11 @@ async function extractMethodsFromFile(
     detectedMethods.push('GET', 'POST');
   }
 
-  const { schema, confidence } = await tryImportZodSchema(filePath, zodAlias);
+  const zodResult = await tryImportZodSchema(filePath, zodAlias);
+  const { schema, confidence } =
+    zodResult.confidence !== 'unknown'
+      ? zodResult
+      : await extractManualValidationSchemaFromFile(filePath);
   const sourceFile = relative(sourceRoot, filePath);
 
   // Find approximate source line for the handler

@@ -15,6 +15,36 @@ type InitOptions = {
   noInteractive?: boolean;
 };
 
+/**
+ * Read the project's package.json dev script and extract the Next.js dev port if specified.
+ * Handles: -p <port>, --port <port>, --port=<port>, PORT=<port> next dev.
+ * Returns undefined on any parse failure so the caller falls back to the default.
+ */
+export function detectNextjsDevPort(projectRoot: string): number | undefined {
+  try {
+    const pkgPath = resolve(projectRoot, 'package.json');
+    const pkg = JSON.parse(readFileSync(pkgPath, 'utf-8')) as Record<string, unknown>;
+    const scripts = pkg['scripts'];
+    if (!scripts || typeof scripts !== 'object') return undefined;
+    const devScript = (scripts as Record<string, unknown>)['dev'];
+    if (typeof devScript !== 'string') return undefined;
+
+    const patterns = [
+      /next\s+dev\s+(?:\S+\s+)*-p\s+(\d+)/,
+      /next\s+dev\s+(?:\S+\s+)*--port\s+(\d+)/,
+      /next\s+dev\s+(?:\S+\s+)*--port=(\d+)/,
+      /PORT=(\d+)\s+next\s+dev/,
+    ];
+    for (const re of patterns) {
+      const m = re.exec(devScript);
+      if (m) return parseInt(m[1], 10);
+    }
+    return undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 function defaultBaseUrl(stack: string): string {
   const urls: Record<string, string> = {
     nextjs: 'http://localhost:3000',
@@ -94,7 +124,10 @@ export async function runInit(opts: InitOptions): Promise<void> {
         'Could not detect stack. Use --stack=<nextjs|express|fastapi|django|openapi> to override.'
       );
     }
-    const baseUrl = opts.baseUrl ?? defaultBaseUrl(detected);
+    const detectedPort = detected === 'nextjs' ? detectNextjsDevPort(projectRoot) : undefined;
+    const baseUrl =
+      opts.baseUrl ??
+      (detectedPort !== undefined ? `http://localhost:${detectedPort}` : defaultBaseUrl(detected));
     const surface = await buildSurfaceConfig('web', projectRoot, detected, baseUrl);
     surfaces = [surface];
   }

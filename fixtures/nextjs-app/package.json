@@ -1,6 +1,11 @@
 {
   "name": "nextjs-app-fixture",
   "private": true,
+  "scripts": {
+    "dev": "next dev -p ${PORT:-3010}",
+    "start": "next start -p ${PORT:-3010}",
+    "build": "next build"
+  },
   "dependencies": {
     "next": "15.0.0",
     "zod": "3.25.76"

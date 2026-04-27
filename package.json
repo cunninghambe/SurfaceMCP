@@ -13,7 +13,8 @@
     "dev": "node_modules/.bin/tsx watch src/server/http.ts",
     "typecheck": "node_modules/.bin/tsc --noEmit",
     "test": "node_modules/.bin/vitest run",
-    "test:watch": "node_modules/.bin/vitest"
+    "test:watch": "node_modules/.bin/vitest",
+    "test:e2e": "npm run build && node_modules/.bin/vitest run --config vitest.e2e.config.ts"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "1.29.0",

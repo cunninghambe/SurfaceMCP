@@ -80,6 +80,21 @@ describe('nextjs-app route extraction', () => {
   });
 });
 
+describe('manual-validation schema recovery (§B regression)', () => {
+  it('assigns partial confidence to a route with manual if-guard validation', async () => {
+    const root = resolve(FIXTURES, 'nextjs-app');
+    const tools = await extractNextjsRoutes(root);
+    const postJournal = tools.find(
+      (t) => t.method === 'POST' && t.path === '/api/journal-entries'
+    );
+    expect(postJournal).toBeDefined();
+    expect(postJournal!.inputSchemaConfidence).toBe('partial');
+    expect(postJournal!.inputSchema.required).toContain('memo');
+    expect(postJournal!.inputSchema.required).toContain('amount');
+    expect(postJournal!.inputSchema.properties?.['amount']).toMatchObject({ type: 'number' });
+  });
+});
+
 describe('schema introspection — constraint extraction', () => {
   it('extracts email format from zod .email()', async () => {
     const root = resolve(FIXTURES, 'nextjs-app');

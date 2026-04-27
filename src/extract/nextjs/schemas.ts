@@ -1,4 +1,4 @@
-import { Project, Node, SyntaxKind, type SourceFile } from 'ts-morph';
+import { Project, Node, SyntaxKind, type SourceFile, type IfStatement } from 'ts-morph';
 import { zodToJsonSchema } from 'zod-to-json-schema';
 import { type ZodSchema } from 'zod';
 import type { JsonSchema2020, InputSchemaConfidence } from '../../types.js';
@@ -180,6 +180,261 @@ export function zodSchemaToJsonSchema(
     $refStrategy: 'none',
   });
   return result as JsonSchema2020;
+}
+
+/**
+ * Find the body variable name(s) used in a handler by looking for
+ * `const body = await req.json()` (or similar) patterns.
+ */
+function findBodyVarNames(fn: Node): Set<string> {
+  const names = new Set<string>();
+  // Primary: const <name> = await req.json()
+  for (const varDecl of fn.getDescendantsOfKind(SyntaxKind.VariableDeclaration)) {
+    const init = varDecl.getInitializer();
+    if (!init) continue;
+    const text = init.getText().trim();
+    if (/req\.json\(\)|request\.json\(\)|body/.test(text)) {
+      names.add(varDecl.getName());
+    }
+  }
+  // Fallback: common name
+  if (names.size === 0) names.add('body');
+  return names;
+}
+
+/**
+ * Collect variable names that were destructured from the body variable.
+ * `const { a, b } = body;` → binds 'a' and 'b' as body fields.
+ */
+function findDestructuredBodyFields(fn: Node, bodyVarNames: Set<string>): Map<string, string> {
+  // Maps local var name → body field name (same when no aliasing)
+  const fieldBindings = new Map<string, string>();
+  for (const varDecl of fn.getDescendantsOfKind(SyntaxKind.VariableDeclaration)) {
+    const init = varDecl.getInitializer();
+    if (!init || !Node.isIdentifier(init)) continue;
+    if (!bodyVarNames.has(init.getText())) continue;
+    // LHS must be an object binding pattern: const { a, b } = body
+    const nameNode = varDecl.getNameNode();
+    if (!Node.isObjectBindingPattern(nameNode)) continue;
+    for (const el of nameNode.getElements()) {
+      const propName = el.getPropertyNameNode()?.getText() ?? el.getNameNode().getText();
+      const localName = el.getNameNode().getText();
+      fieldBindings.set(localName, propName);
+    }
+  }
+  return fieldBindings;
+}
+
+/** True when this statement is a throw or an early-return with an error status. */
+function isEarlyExit(stmt: Node): boolean {
+  if (Node.isThrowStatement(stmt)) return true;
+  if (Node.isReturnStatement(stmt)) {
+    const text = stmt.getText();
+    // NextResponse.json({…}, { status: 4XX }) pattern
+    return /status\s*:\s*[45]\d\d/.test(text);
+  }
+  return false;
+}
+
+/** Return true if any immediate child statement (or the block itself) is an early exit. */
+function thenIsEarlyExit(ifStmt: IfStatement): boolean {
+  const thenStmt = ifStmt.getThenStatement();
+  if (isEarlyExit(thenStmt)) return true;
+  if (Node.isBlock(thenStmt)) {
+    const stmts = thenStmt.getStatements();
+    return stmts.some((s) => isEarlyExit(s));
+  }
+  return false;
+}
+
+/**
+ * Extract field name and type from a body-access expression like `body.prop`.
+ * Returns null if the expression is not a simple body member access.
+ */
+function extractBodyPropAccess(
+  expr: Node,
+  bodyVarNames: Set<string>
+): { field: string; type: 'string' } | null {
+  if (!Node.isPropertyAccessExpression(expr)) return null;
+  const obj = expr.getExpression();
+  if (!Node.isIdentifier(obj)) return null;
+  if (!bodyVarNames.has(obj.getText())) return null;
+  return { field: expr.getName(), type: 'string' };
+}
+
+/**
+ * Walk IfStatements in the handler body and collect validated fields.
+ * Returns a map of field → JsonSchema type.
+ */
+function collectValidatedFields(
+  fn: Node,
+  bodyVarNames: Set<string>,
+  destructuredFields: Map<string, string>
+): Map<string, JsonSchema2020> {
+  const fields = new Map<string, JsonSchema2020>();
+
+  for (const ifStmt of fn.getDescendantsOfKind(SyntaxKind.IfStatement)) {
+    if (!thenIsEarlyExit(ifStmt)) continue;
+
+    const condition = ifStmt.getExpression();
+
+    // Pattern 1 & 3: !body.prop (possibly combined with length check via ||)
+    // Unwrap PrefixUnary `!expr`
+    if (Node.isPrefixUnaryExpression(condition)) {
+      const operand = condition.getOperand();
+      const hit = extractBodyPropAccess(operand, bodyVarNames);
+      if (hit) {
+        fields.set(hit.field, { type: 'string' });
+        continue;
+      }
+      // Could also be a simple identifier from destructuring: !name
+      if (Node.isIdentifier(operand)) {
+        const localName = operand.getText();
+        const bodyField = destructuredFields.get(localName);
+        if (bodyField) {
+          fields.set(bodyField, { type: 'string' });
+          continue;
+        }
+      }
+    }
+
+    // Pattern 3: `!body.prop || body.prop.length === 0` — left side is the guard
+    if (Node.isBinaryExpression(condition)) {
+      const opKind = condition.getOperatorToken().getKind();
+      // ||  operator = BarBarToken
+      if (opKind === SyntaxKind.BarBarToken) {
+        const left = condition.getLeft();
+        if (Node.isPrefixUnaryExpression(left)) {
+          const hit = extractBodyPropAccess(left.getOperand(), bodyVarNames);
+          if (hit) {
+            fields.set(hit.field, { type: 'string' });
+            continue;
+          }
+          if (Node.isIdentifier(left.getOperand())) {
+            const bodyField = destructuredFields.get(left.getOperand().getText());
+            if (bodyField) {
+              fields.set(bodyField, { type: 'string' });
+              continue;
+            }
+          }
+        }
+      }
+
+      // Pattern 2: typeof body.prop !== 'string'/'number'/'boolean'
+      if (
+        opKind === SyntaxKind.ExclamationEqualsEqualsToken ||
+        opKind === SyntaxKind.ExclamationEqualsToken
+      ) {
+        const left = condition.getLeft();
+        const right = condition.getRight();
+        if (
+          Node.isTypeOfExpression(left) &&
+          Node.isStringLiteral(right)
+        ) {
+          const typeofOperand = left.getExpression();
+          const typeStr = right.getLiteralText();
+          const jsType = typeStr === 'number' ? 'number' : typeStr === 'boolean' ? 'boolean' : 'string';
+          const hit = extractBodyPropAccess(typeofOperand, bodyVarNames);
+          if (hit) {
+            fields.set(hit.field, { type: jsType });
+            continue;
+          }
+        }
+      }
+    }
+  }
+
+  return fields;
+}
+
+/**
+ * Analyse a route source file for manual validation patterns (if (!body.x) throw …).
+ * Returns a partial schema when guards are found, or unknown if none are found
+ * or if Zod .parse() is already present (defer to extractZodSchema).
+ *
+ * Known limitation: validation inside helper functions is not followed.
+ */
+export function extractManualValidationSchema(
+  sf: SourceFile,
+  methodName: string
+): SchemaResult {
+  // Defer to extractZodSchema if .parse() or .safeParse() is called anywhere in the file
+  const callExprs = sf.getDescendantsOfKind(SyntaxKind.CallExpression);
+  for (const call of callExprs) {
+    const expr = call.getExpression();
+    if (Node.isPropertyAccessExpression(expr)) {
+      const method = expr.getName();
+      if (method === 'parse' || method === 'safeParse') {
+        return { schema: UNKNOWN_SCHEMA, confidence: 'unknown' };
+      }
+    }
+  }
+
+  // Find exported handler: `export async function POST(` or `export function POST(`
+  const handlerFn =
+    sf.getFunctions().find((fn) => {
+      if (!fn.isExported()) return false;
+      return fn.getName() === methodName;
+    }) ??
+    sf.getVariableDeclarations().find((vd) => {
+      if (vd.getName() !== methodName) return false;
+      const stmt = vd.getVariableStatement();
+      return stmt?.isExported() ?? false;
+    });
+
+  if (!handlerFn) return { schema: UNKNOWN_SCHEMA, confidence: 'unknown' };
+
+  const bodyVarNames = findBodyVarNames(handlerFn);
+  const destructuredFields = findDestructuredBodyFields(handlerFn, bodyVarNames);
+  const validatedFields = collectValidatedFields(handlerFn, bodyVarNames, destructuredFields);
+
+  if (validatedFields.size === 0) return { schema: UNKNOWN_SCHEMA, confidence: 'unknown' };
+
+  const properties: Record<string, JsonSchema2020> = {};
+  for (const [field, fieldSchema] of validatedFields) {
+    properties[field] = fieldSchema;
+  }
+  const required = [...validatedFields.keys()].sort();
+
+  return {
+    schema: { type: 'object', properties, required },
+    confidence: 'partial',
+  };
+}
+
+/**
+ * Load a route file from disk and run extractManualValidationSchema across all
+ * detected HTTP method handlers. Returns the union of found fields.
+ */
+export async function extractManualValidationSchemaFromFile(
+  filePath: string
+): Promise<SchemaResult> {
+  const HTTP_METHODS_LIST = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD', 'OPTIONS'];
+  try {
+    const project = new Project({ useInMemoryFileSystem: false });
+    const sf = project.addSourceFileAtPath(filePath);
+
+    const allFields = new Map<string, JsonSchema2020>();
+    for (const method of HTTP_METHODS_LIST) {
+      const result = extractManualValidationSchema(sf, method);
+      if (result.confidence === 'partial' && result.schema.properties) {
+        for (const [field, schema] of Object.entries(result.schema.properties)) {
+          allFields.set(field, schema);
+        }
+      }
+    }
+
+    if (allFields.size === 0) return { schema: UNKNOWN_SCHEMA, confidence: 'unknown' };
+
+    const properties: Record<string, JsonSchema2020> = {};
+    for (const [field, schema] of allFields) {
+      properties[field] = schema;
+    }
+    const required = [...allFields.keys()].sort();
+    return { schema: { type: 'object', properties, required }, confidence: 'partial' };
+  } catch {
+    return { schema: UNKNOWN_SCHEMA, confidence: 'unknown' };
+  }
 }
 
 /**
