@@ -53,9 +53,11 @@ describe('SurfaceMCP e2e against fixtures/nextjs-app', () => {
     }
   });
 
-  it('surface_routes_for_page returns the journal-entries tool for its file', async () => {
+  it('surface_routes_for_page returns the journal-entries tool for its page', async () => {
+    // app/journal/page.tsx calls fetch('/api/journal-entries') — surface_routes_for_page
+    // scans for fetch calls and matches them to known tool paths.
     const result = await server.callTool('surface_routes_for_page', {
-      pagePath: 'app/api/journal-entries/route.ts',
+      pagePath: 'app/journal/page.tsx',
     }) as { tools: Array<{ toolId: string; name: string; sourceLocation: string }> };
     expect(result.tools.length).toBeGreaterThan(0);
   });
