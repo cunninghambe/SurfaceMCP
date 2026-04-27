@@ -1,5 +1,5 @@
 import { writeFileSync, existsSync, readFileSync, mkdirSync, appendFileSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { resolve, join } from 'node:path';
 import { detectStack } from '../detect/index.js';
 import { detectMultiSurface } from '../detect/monorepo.js';
 import { allocatePort } from '../port/allocator.js';
@@ -177,6 +177,20 @@ export async function runInit(opts: InitOptions): Promise<void> {
       throw new Error(
         'Could not detect stack. Use --stack=<nextjs|vite|express|fastapi|django|openapi> to override.'
       );
+    }
+    // Hint: Vite present but no recognized router — manual config needed
+    if (detected !== 'vite') {
+      const hasViteConfig =
+        existsSync(join(projectRoot, 'vite.config.js')) ||
+        existsSync(join(projectRoot, 'vite.config.ts')) ||
+        existsSync(join(projectRoot, 'vite.config.mjs'));
+      if (hasViteConfig) {
+        console.log(
+          'Vite detected but no recognized router. If this app routes via custom code ' +
+          '(tab-state, hand-rolled history), set stack: "vite" manually in ' +
+          'surfacemcp.config.json and SurfaceMCP will return a crawl seed.'
+        );
+      }
     }
     const detectedPort =
       detected === 'nextjs' ? detectNextjsDevPort(projectRoot) :

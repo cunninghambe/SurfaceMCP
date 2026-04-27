@@ -405,6 +405,7 @@ function walkJsxRoutes(
             lazy: resolved.lazy,
             dynamicParams: dynamicParams(effectivePath),
             declaredAt: { file: relative(root, filePath), line: node.getStartLineNumber() },
+            source: 'static',
           });
         }
       }
@@ -497,6 +498,7 @@ function processRouteObject(
         lazy: false,
         dynamicParams: dynamicParams(effectivePath),
         declaredAt: { file: relative(root, filePath), line: obj.getStartLineNumber() },
+        source: 'static',
       });
     } else {
       skips.push({
@@ -512,6 +514,7 @@ function processRouteObject(
         lazy: false,
         dynamicParams: dynamicParams(effectivePath),
         declaredAt: { file: relative(root, filePath), line: obj.getStartLineNumber() },
+        source: 'static',
       });
     }
   }
@@ -703,14 +706,35 @@ export async function extractVitePages(root: string): Promise<{ pages: Page[]; s
   // Deduplication
   const dedupedPages = dedup(allPages, allSkips);
 
-  // Tab-state routing detection (§ 8.5)
+  // Crawl-seed fallback: when no static routes resolved, emit a seed page so
+  // BugHunter can discover routes at runtime via link-following.
   if (dedupedPages.length === 0) {
     const pushStateCount = detectTabStateRouting(files);
+    const reasonDetail = pushStateCount > 0
+      ? `tab-state routing suspected (${pushStateCount} pushState callsites); seeding crawl from /`
+      : 'no static routes resolved; seeding crawl from /';
+
+    dedupedPages.push({
+      route: '/',
+      sourceFile: '<unresolved>',
+      componentName: undefined,
+      lazy: false,
+      dynamicParams: [],
+      declaredAt: { file: '<crawl-seed>', line: 0 },
+      source: 'crawl_seed',
+    });
+
+    allSkips.push({
+      route: '/',
+      reason: 'crawl_seed_emitted',
+      detail: reasonDetail,
+    });
+
     if (pushStateCount > 0) {
       allSkips.push({
         route: '<unknown>',
         reason: 'tab_state_routing_suspected',
-        detail: `${pushStateCount} pushState callsites found; tab-state routing is a v0.3 feature`,
+        detail: `${pushStateCount} pushState callsites found`,
       });
     }
   }
