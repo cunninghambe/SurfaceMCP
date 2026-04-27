@@ -10,7 +10,7 @@ import { classifyByCallGraph } from '../classify/call-graph.js';
 import { log } from '../log.js';
 
 let catalog: ToolCatalog = { revision: 0, tools: [] };
-let pageCatalog: PageCatalog = { revision: 0, pages: [] };
+let pageCatalog: PageCatalog = { revision: 0, pages: [], skips: [] };
 
 export function getCatalog(): ToolCatalog {
   return catalog;
@@ -91,6 +91,7 @@ export async function regeneratePageCatalog(surface: SurfaceConfig, root: string
     pageCatalog = {
       revision: pageCatalog.revision + 1,
       pages,
+      skips,
     };
     if (skips.length > 0) {
       log.info({ skips }, 'page extraction skips');

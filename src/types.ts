@@ -85,6 +85,7 @@ export type Page = {
 export type PageCatalog = {
   revision: number;
   pages: Page[];
+  skips: PageSkip[];
 };
 
 export type PageSkip = {

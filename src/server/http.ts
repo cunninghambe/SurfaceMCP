@@ -271,7 +271,7 @@ function registerMetaTools(
       if (typeof args.filter?.lazy === 'boolean') {
         pages = pages.filter((p) => p.lazy === args.filter!.lazy);
       }
-      return toolOk({ revision: pc.revision, pages });
+      return toolOk({ revision: pc.revision, pages, skips: pc.skips });
     }
   );
 
