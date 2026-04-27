@@ -30,7 +30,7 @@ function toolId(method: string, path: string): string {
 function pathToToolName(method: string, path: string): string {
   const normalized = path
     .replace(/^\//, '')
-    .replace(/[/{]/g, '_')
+    .replace(/[/{:]/g, '_')
     .replace(/}/g, '')
     .replace(/_+/g, '_')
     .replace(/^_|_$/g, '');

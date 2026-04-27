@@ -1,5 +1,7 @@
 import { createHash } from 'node:crypto';
 import type { ToolMeta, JsonSchema2020, SideEffectClass } from '../../types.js';
+import { extractOpenApiRoutes } from '../openapi/parse.js';
+import { log } from '../../log.js';
 
 type OpenApiSchema = {
   openapi?: string;
@@ -33,7 +35,7 @@ function toolId(method: string, path: string): string {
 function pathToToolName(method: string, path: string): string {
   const normalized = path
     .replace(/^\//, '')
-    .replace(/[/{]/g, '_')
+    .replace(/[/{:]/g, '_')
     .replace(/}/g, '')
     .replace(/_+/g, '_')
     .replace(/^_|_$/g, '');
@@ -81,18 +83,7 @@ function buildInputSchema(
   return { schema: { type: 'object', additionalProperties: true }, confidence: 'unknown' };
 }
 
-export async function fetchFastApiSchema(baseUrl: string): Promise<ToolMeta[]> {
-  const openApiUrl = `${baseUrl.replace(/\/$/, '')}/openapi.json`;
-
-  let spec: OpenApiSchema;
-  try {
-    const res = await fetch(openApiUrl, { signal: AbortSignal.timeout(10_000) });
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    spec = await res.json() as OpenApiSchema;
-  } catch (err) {
-    throw new Error(`Failed to fetch FastAPI OpenAPI spec from ${openApiUrl}: ${String(err)}`);
-  }
-
+function specToTools(spec: OpenApiSchema): ToolMeta[] {
   const tools: ToolMeta[] = [];
   const nameCounts = new Map<string, number>();
 
@@ -124,4 +115,31 @@ export async function fetchFastApiSchema(baseUrl: string): Promise<ToolMeta[]> {
   }
 
   return tools;
+}
+
+export async function fetchFastApiSchema(baseUrl: string, root?: string): Promise<ToolMeta[]> {
+  const openApiUrl = `${baseUrl.replace(/\/$/, '')}/openapi.json`;
+
+  let spec: OpenApiSchema | null = null;
+  try {
+    const res = await fetch(openApiUrl, { signal: AbortSignal.timeout(10_000) });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    spec = await res.json() as OpenApiSchema;
+  } catch (err) {
+    log.warn({ openApiUrl, err: String(err) }, 'FastAPI live fetch failed; trying static fallback');
+  }
+
+  if (!spec) {
+    if (root) {
+      const fallback = extractOpenApiRoutes(root);
+      if (fallback.length > 0) {
+        log.info({ count: fallback.length }, 'FastAPI catalog from static openapi.json');
+        return fallback;
+      }
+    }
+    log.warn({ openApiUrl }, 'FastAPI catalog empty: no live server, no static spec');
+    return [];
+  }
+
+  return specToTools(spec);
 }

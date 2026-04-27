@@ -41,7 +41,7 @@ export async function regenerateCatalog(surface: SurfaceConfig, root: string): P
         tools = await extractExpressRoutes(root, surface.schemaIntrospection?.zodAlias);
         break;
       case 'fastapi':
-        tools = await fetchFastApiSchema(surface.baseUrl);
+        tools = await fetchFastApiSchema(surface.baseUrl, root);
         break;
       case 'django':
         tools = extractDjangoRoutes(root);
