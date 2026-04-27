@@ -45,6 +45,16 @@ export function detectNextjsDevPort(projectRoot: string): number | undefined {
   }
 }
 
+function defaultLaunchCommand(stack: string): string | undefined {
+  const cmds: Record<string, string> = {
+    nextjs: 'npm run dev',
+    express: 'npm run dev',
+    fastapi: 'uvicorn main:app --reload',
+    django: 'python manage.py runserver',
+  };
+  return cmds[stack];
+}
+
 function defaultBaseUrl(stack: string): string {
   const urls: Record<string, string> = {
     nextjs: 'http://localhost:3000',
@@ -84,7 +94,7 @@ async function buildSurfaceConfig(
     root: '.',
     baseUrl,
     port,
-    launchDevCommand: stack === 'nextjs' ? 'npm run dev' : undefined,
+    launchDevCommand: defaultLaunchCommand(stack),
     watchPaths: defaultWatchPaths(stack),
     watchIgnore: [],
     auth: { kind: 'none' },

@@ -16,6 +16,7 @@ import { recoverFromFastApiError } from '../probe/fastapi-error.js';
 import { loadSampleInputs } from '../samples/fixture-loader.js';
 import { log } from '../log.js';
 import { resolve } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import type { ToolMeta, ProbeResult, SurfaceConfig } from '../types.js';
 
 function toolOk(data: unknown) {
@@ -365,25 +366,30 @@ export async function createApp(
   return app;
 }
 
-// Entry point when run directly
-const configPath = process.env.SURFACEMCP_CONFIG ?? findConfigPath(process.cwd());
-const config = loadConfig(configPath);
-const projectRoot = process.cwd();
+// Entry point when run directly (e.g. `node dist/server/http.js`)
+const isEntrypoint =
+  process.argv[1] !== undefined &&
+  import.meta.url === pathToFileURL(process.argv[1]).href;
 
-loadEnvFiles(projectRoot);
+if (isEntrypoint) {
+  const configPath = process.env.SURFACEMCP_CONFIG ?? findConfigPath(process.cwd());
+  const config = loadConfig(configPath);
+  const projectRoot = process.cwd();
 
-// For now, serve first surface
-const surface = config.surfaces[0]!;
-const resolvedRoot = resolve(projectRoot, surface.root);
+  loadEnvFiles(projectRoot);
 
-createApp(surface, resolvedRoot).then((app) => {
-  app.listen(surface.port, '127.0.0.1', () => {
-    log.info(
-      { port: surface.port, endpoint: `http://127.0.0.1:${surface.port}/mcp` },
-      `SurfaceMCP ${surface.name} listening`
-    );
+  const surface = config.surfaces[0]!;
+  const resolvedRoot = resolve(projectRoot, surface.root);
+
+  createApp(surface, resolvedRoot).then((app) => {
+    app.listen(surface.port, '127.0.0.1', () => {
+      log.info(
+        { port: surface.port, endpoint: `http://127.0.0.1:${surface.port}/mcp` },
+        `SurfaceMCP ${surface.name} listening`
+      );
+    });
+  }).catch((err: unknown) => {
+    log.error({ err }, 'Failed to start SurfaceMCP');
+    process.exit(1);
   });
-}).catch((err: unknown) => {
-  log.error({ err }, 'Failed to start SurfaceMCP');
-  process.exit(1);
-});
+}

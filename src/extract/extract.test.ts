@@ -137,20 +137,31 @@ describe('express route extraction', () => {
 });
 
 describe('django route extraction', () => {
-  it('discovers all must-discover routes', () => {
+  it('discovers exactly the must-discover route set (no false positives)', () => {
     const root = resolve(FIXTURES, 'django-app');
     const tools = extractDjangoRoutes(root);
     const must = loadMustDiscover('django-app');
 
-    // Django routes: normalize trailing slashes for comparison
     const discovered = new Set(tools.map((t) => `${t.method} ${t.path}`));
+    const expected = new Set(must.routes ?? []);
 
-    for (const route of must.routes ?? []) {
-      // Check with and without trailing slash (Django URLs often have trailing slashes)
-      const withSlash = route.endsWith('/') ? route : route + '/';
-      const withoutSlash = route.endsWith('/') ? route.slice(0, -1) : route;
-      const found = discovered.has(route) || discovered.has(withSlash) || discovered.has(withoutSlash);
-      expect(found, `Missing route: ${route} (discovered: ${[...discovered].join(', ')})`).toBe(true);
+    // Every expected route present
+    for (const route of expected) {
+      expect(discovered.has(route), `Missing route: ${route}`).toBe(true);
+    }
+    // No extras
+    expect(
+      [...discovered].filter((r) => !expected.has(r)),
+      'Unexpected routes discovered'
+    ).toEqual([]);
+    expect(discovered.size).toBe(expected.size);
+  });
+
+  it('emits no invalid characters in tool names', () => {
+    const root = resolve(FIXTURES, 'django-app');
+    const tools = extractDjangoRoutes(root);
+    for (const t of tools) {
+      expect(t.name, `bad tool name: ${t.name}`).toMatch(/^[a-z0-9_]+$/);
     }
   });
 });
