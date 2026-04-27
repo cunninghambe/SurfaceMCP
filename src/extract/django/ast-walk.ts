@@ -18,7 +18,7 @@ function toolId(method: string, path: string): string {
 function pathToToolName(method: string, path: string): string {
   const normalized = path
     .replace(/^\//, '')
-    .replace(/[/<>]/g, '_')
+    .replace(/[/<>:]/g, '_')
     .replace(/_+/g, '_')
     .replace(/^_|_$/g, '');
   return `${method.toLowerCase()}_${normalized || 'root'}`;
@@ -64,15 +64,43 @@ function parseUrlsFile(content: string): ParsedEntry[] {
         entries.push({ prefix, viewRef: null, includeTarget: includeMatch[1], sourceLine: i + 1 });
       }
     } else {
-      // Direct view reference
-      entries.push({ prefix, viewRef: rest, includeTarget: null, sourceLine: i + 1 });
+      // Direct view reference — strip trailing call invocation (e.g. `.as_view(...)`) so we
+      // keep only the dotted class/function path (e.g. `views.ItemListView`).
+      const cleanedRef = rest.replace(/\.as_view\b.*$/, '').replace(/\s*\(.*$/, '').replace(/[,\s].*$/, '');
+      entries.push({ prefix, viewRef: cleanedRef, includeTarget: null, sourceLine: i + 1 });
     }
   }
 
   return entries;
 }
 
-function guessMethodsFromViewRef(viewRef: string, fileContent: string): string[] {
+function methodsForClass(className: string, viewsContent: string): string[] {
+  const re = new RegExp(`class\\s+${className}\\b[^:]*:`, 'm');
+  const m = re.exec(viewsContent);
+  if (!m) return [];
+  const after = viewsContent.slice(m.index + m[0].length);
+  // Stop at the next top-level (column-0) class or def — those terminate the class block.
+  const end = after.search(/^(?:class|def)\s+/m);
+  const body = end === -1 ? after : after.slice(0, end);
+
+  const httpMethodNames = /http_method_names\s*=\s*\[([^\]]+)\]/.exec(body);
+  if (httpMethodNames) {
+    return httpMethodNames[1]
+      .split(',')
+      .map((s) => s.trim().replace(/['"]/g, '').toUpperCase())
+      .filter((s) => s);
+  }
+
+  const methods: string[] = [];
+  if (/^\s+def\s+get\s*\(/m.test(body)) methods.push('GET');
+  if (/^\s+def\s+post\s*\(/m.test(body)) methods.push('POST');
+  if (/^\s+def\s+put\s*\(/m.test(body)) methods.push('PUT');
+  if (/^\s+def\s+patch\s*\(/m.test(body)) methods.push('PATCH');
+  if (/^\s+def\s+delete\s*\(/m.test(body)) methods.push('DELETE');
+  return methods;
+}
+
+function guessMethodsFromViewRef(viewRef: string, viewsContent: string): string[] {
   const name = viewRef.split('.').pop() ?? viewRef;
   const nameLower = name.toLowerCase();
 
@@ -85,24 +113,9 @@ function guessMethodsFromViewRef(viewRef: string, fileContent: string): string[]
   if (nameLower.includes('update') && !nameLower.includes('list')) return ['PUT', 'PATCH'];
   if (nameLower.includes('destroy') || nameLower.endsWith('delete')) return ['DELETE'];
 
-  // Try to detect from the file content (view class methods)
-  if (/class\s+\w+.*View/.test(fileContent)) {
-    const methodsMatch = /http_method_names\s*=\s*\[([^\]]+)\]/.exec(fileContent);
-    if (methodsMatch) {
-      return methodsMatch[1]
-        .split(',')
-        .map((m) => m.trim().replace(/['"]/g, '').toUpperCase())
-        .filter((m) => m);
-    }
-    // APIView with def get/post/put/patch/delete methods
-    const methods: string[] = [];
-    if (/^\s+def get\s*\(/m.test(fileContent)) methods.push('GET');
-    if (/^\s+def post\s*\(/m.test(fileContent)) methods.push('POST');
-    if (/^\s+def put\s*\(/m.test(fileContent)) methods.push('PUT');
-    if (/^\s+def patch\s*\(/m.test(fileContent)) methods.push('PATCH');
-    if (/^\s+def delete\s*\(/m.test(fileContent)) methods.push('DELETE');
-    if (methods.length > 0) return methods;
-  }
+  // Scan the target class body in the views file
+  const classMethods = methodsForClass(name, viewsContent);
+  if (classMethods.length > 0) return classMethods;
 
   return ['GET', 'POST'];
 }
@@ -150,7 +163,6 @@ function walkUrlsFile(
 
   // Also load sibling views.py to get method info
   const viewsContent = loadViewsContent(filePath);
-  const combinedContent = content + '\n' + viewsContent;
 
   const entries = parseUrlsFile(content);
   const routes: RouteEntry[] = [];
@@ -168,7 +180,7 @@ function walkUrlsFile(
 
     if (!entry.viewRef) continue;
 
-    const methods = guessMethodsFromViewRef(entry.viewRef, combinedContent);
+    const methods = guessMethodsFromViewRef(entry.viewRef, viewsContent);
     for (const method of methods) {
       const path = '/' + normalizeDjangoPath(fullPrefix);
       routes.push({
