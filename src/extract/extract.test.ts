@@ -135,6 +135,20 @@ describe('express route extraction', () => {
       expect(discovered.has(route), `Missing route: ${route}`).toBe(true);
     }
   });
+
+  it('scopes inputSchema to routes that validate the body', async () => {
+    const root = resolve(FIXTURES, 'express-app');
+    const tools = await extractExpressRoutes(root);
+    const get  = tools.find(t => t.method === 'GET'    && t.path === '/api/products');
+    const post = tools.find(t => t.method === 'POST'   && t.path === '/api/products');
+    const put  = tools.find(t => t.method === 'PUT'    && t.path === '/api/products/:id');
+    const del  = tools.find(t => t.method === 'DELETE' && t.path === '/api/products/:id');
+    expect(get!.inputSchemaConfidence).toBe('unknown');
+    expect(post!.inputSchemaConfidence).toBe('introspected');
+    expect(post!.inputSchema.properties?.name).toBeDefined();
+    expect(put!.inputSchemaConfidence).toBe('introspected');
+    expect(del!.inputSchemaConfidence).toBe('unknown');
+  });
 });
 
 describe('django route extraction', () => {

@@ -438,6 +438,68 @@ export async function extractManualValidationSchemaFromFile(
 }
 
 /**
+ * Like extractZodSchema but constrained to descendants of `scopeNode`.
+ * Optionally filters to a specific schema variable name (for pattern C).
+ */
+export function extractZodSchemaForNode(
+  scopeNode: Node,
+  sf: SourceFile,
+  zodAlias = 'z',
+  varName?: string
+): SchemaResult {
+  const callExprs = scopeNode.getDescendantsOfKind(SyntaxKind.CallExpression);
+  for (const call of callExprs) {
+    const expr = call.getExpression();
+    if (!Node.isPropertyAccessExpression(expr)) continue;
+    const methodName = expr.getName();
+    if (methodName !== 'parse' && methodName !== 'safeParse') continue;
+    const obj = expr.getExpression();
+    if (varName && Node.isIdentifier(obj) && obj.getText() !== varName) continue;
+    const schema = tryResolveZodSchemaInScope(obj, scopeNode, sf, zodAlias);
+    if (schema) return { schema, confidence: 'introspected' };
+  }
+  return { schema: UNKNOWN_SCHEMA, confidence: 'unknown' };
+}
+
+/**
+ * Resolve a schema identifier node against file-level declarations or direct z.* calls.
+ * Handles identifiers, property-access expressions, and inline z.object({...}) nodes.
+ */
+export function tryResolveSchemaIdentifier(node: Node, sf: SourceFile, zodAlias = 'z'): SchemaResult {
+  const schema = tryResolveZodSchema(node, sf, zodAlias);
+  if (schema) return { schema, confidence: 'introspected' };
+  return { schema: UNKNOWN_SCHEMA, confidence: 'unknown' };
+}
+
+/**
+ * Resolve a zod schema reference constrained to a scope node first,
+ * then falling back to file-level declarations.
+ */
+function tryResolveZodSchemaInScope(
+  node: Node,
+  scopeNode: Node,
+  sf: SourceFile,
+  zodAlias: string
+): JsonSchema2020 | null {
+  if (isZodCall(node, zodAlias)) return zodNodeToJsonSchema(node);
+
+  if (Node.isIdentifier(node)) {
+    const name = node.getText();
+    // Local variable declaration inside the scope (pattern C)
+    for (const varDecl of scopeNode.getDescendantsOfKind(SyntaxKind.VariableDeclaration)) {
+      if (varDecl.getName() !== name) continue;
+      const init = varDecl.getInitializer();
+      if (!init) continue;
+      if (isZodCall(init, zodAlias)) return zodNodeToJsonSchema(init);
+    }
+    // Fall through to file-level
+    return tryResolveZodSchema(node, sf, zodAlias);
+  }
+
+  return null;
+}
+
+/**
  * Try to dynamically import a route file and extract its exported zod schema.
  */
 export async function tryImportZodSchema(
