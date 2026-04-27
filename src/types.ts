@@ -156,6 +156,7 @@ export type SurfaceConfig = {
   schemaIntrospection?: {
     zodAlias?: string;
     pydanticBaseClass?: string;
+    bodyValidatorNames?: string[];
   };
   excludedRoutes?: string[];
   externalIntegrations?: string[];

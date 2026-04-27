@@ -1,9 +1,9 @@
 import { readdirSync, existsSync, readFileSync } from 'node:fs';
 import { resolve, relative } from 'node:path';
 import { createHash } from 'node:crypto';
-import { Project, SyntaxKind, type CallExpression } from 'ts-morph';
+import { Project, SyntaxKind, type CallExpression, type SourceFile } from 'ts-morph';
 import type { ToolMeta, SideEffectClass } from '../../types.js';
-import { tryImportZodSchema } from '../nextjs/schemas.js';
+import { resolveRouteSchema } from './schema-scope.js';
 
 function toolId(method: string, path: string): string {
   return createHash('sha1')
@@ -35,6 +35,8 @@ type RouteCall = {
   path: string;
   sourceFile: string;
   sourceLine: number;
+  callNode?: CallExpression;
+  sf?: SourceFile;
 };
 
 function extractRoutesFromFile(filePath: string): RouteCall[] {
@@ -70,10 +72,12 @@ function extractRoutesFromFile(filePath: string): RouteCall[] {
         path: pathText,
         sourceFile: filePath,
         sourceLine: pos,
+        callNode: call,
+        sf,
       });
     }
   } catch {
-    // Fall back to regex
+    // Fall back to regex — no AST nodes available
     const routePattern = /\.(get|post|put|patch|delete)\s*\(['"`]([^'"` ]+)['"`]/gi;
     let match: RegExpExecArray | null;
     const lines = content.split('\n');
@@ -106,7 +110,12 @@ function walkDir(dir: string, files: string[] = []): string[] {
   return files;
 }
 
-export async function extractExpressRoutes(root: string, zodAlias?: string): Promise<ToolMeta[]> {
+export async function extractExpressRoutes(
+  root: string,
+  zodAlias?: string,
+  bodyValidatorNames?: string[]
+): Promise<ToolMeta[]> {
+  const schemaConfig = bodyValidatorNames ? { bodyValidatorNames } : undefined;
   const allFiles = walkDir(root);
   const rawRoutes: RouteCall[] = [];
 
@@ -118,7 +127,11 @@ export async function extractExpressRoutes(root: string, zodAlias?: string): Pro
   const tools: ToolMeta[] = [];
 
   for (const route of rawRoutes) {
-    const { schema, confidence } = await tryImportZodSchema(route.sourceFile, zodAlias);
+    const { schema, confidence } =
+      route.callNode && route.sf
+        ? await resolveRouteSchema(route.callNode, route.sf, route.method, schemaConfig)
+        : { schema: { type: 'object', additionalProperties: true } as const, confidence: 'unknown' as const };
+
     const base = pathToToolName(route.method, route.path);
     const count = nameCounts.get(base) ?? 0;
     nameCounts.set(base, count + 1);

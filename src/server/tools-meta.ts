@@ -44,7 +44,11 @@ export async function regenerateCatalog(surface: SurfaceConfig, root: string): P
         break;
       }
       case 'express':
-        tools = await extractExpressRoutes(root, surface.schemaIntrospection?.zodAlias);
+        tools = await extractExpressRoutes(
+          root,
+          surface.schemaIntrospection?.zodAlias,
+          surface.schemaIntrospection?.bodyValidatorNames
+        );
         break;
       case 'fastapi':
         tools = await fetchFastApiSchema(surface.baseUrl, root);
