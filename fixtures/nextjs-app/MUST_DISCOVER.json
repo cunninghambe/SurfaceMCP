@@ -5,7 +5,8 @@
     "GET /api/users/:id",
     "PUT /api/users/:id",
     "DELETE /api/users/:id",
-    "GET /api/products"
+    "GET /api/products",
+    "POST /api/journal-entries"
   ],
   "serverActions": []
 }
