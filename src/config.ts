@@ -29,6 +29,10 @@ const AuthConfigSchema = z.discriminatedUnion('kind', [
      * Use 'json' for SaaS apps whose login endpoints expect a JSON payload. */
     bodyFormat: z.enum(['form', 'json']).optional(),
     successCheck: SuccessCheckSchema,
+    uiLoginPath: z.string().optional(),
+    uiLoginFields: z.record(z.string()).optional(),
+    uiTriggerSelector: z.string().optional(),
+    uiSubmitSelector: z.string().optional(),
   }),
   z.object({
     kind: z.literal('nextauth'),
@@ -37,6 +41,10 @@ const AuthConfigSchema = z.discriminatedUnion('kind', [
     cookieName: z.string().optional(),
     fields: z.record(z.string()),
     callbackUrl: z.string().optional(),
+    uiLoginPath: z.string().optional(),
+    uiLoginFields: z.record(z.string()).optional(),
+    uiTriggerSelector: z.string().optional(),
+    uiSubmitSelector: z.string().optional(),
   }),
   z.object({ kind: z.literal('bearer') }),
   z.object({
