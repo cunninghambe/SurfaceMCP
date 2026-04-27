@@ -45,9 +45,51 @@ export function detectNextjsDevPort(projectRoot: string): number | undefined {
   }
 }
 
+/**
+ * Parse the project's package.json dev script for a Vite port flag.
+ * Handles: --port <n>, --port=<n>, vite --port <n>.
+ * Falls back to the server.port in vite.config.{ts,js,mjs} if statically declarable.
+ * Returns undefined on any parse failure so the caller falls back to the default 5173.
+ */
+export function detectViteDevPort(projectRoot: string): number | undefined {
+  try {
+    const pkgPath = resolve(projectRoot, 'package.json');
+    const pkg = JSON.parse(readFileSync(pkgPath, 'utf-8')) as Record<string, unknown>;
+    const scripts = pkg['scripts'];
+    if (scripts && typeof scripts === 'object') {
+      const devScript = (scripts as Record<string, unknown>)['dev'];
+      if (typeof devScript === 'string') {
+        const patterns = [
+          /vite\s+(?:\S+\s+)*--port\s+(\d+)/,
+          /vite\s+(?:\S+\s+)*--port=(\d+)/,
+        ];
+        for (const re of patterns) {
+          const m = re.exec(devScript);
+          if (m) return parseInt(m[1], 10);
+        }
+      }
+    }
+  } catch {
+    // fall through to config parse
+  }
+  // Check vite.config.ts/js for server.port
+  const configCandidates = ['vite.config.ts', 'vite.config.js', 'vite.config.mjs'];
+  for (const configFile of configCandidates) {
+    try {
+      const text = readFileSync(resolve(projectRoot, configFile), 'utf-8');
+      const m = /server\s*:\s*\{[^}]*port\s*:\s*(\d+)/s.exec(text);
+      if (m) return parseInt(m[1], 10);
+    } catch {
+      // skip
+    }
+  }
+  return undefined;
+}
+
 function defaultLaunchCommand(stack: string): string | undefined {
   const cmds: Record<string, string> = {
     nextjs: 'npm run dev',
+    vite: 'npm run dev',
     express: 'npm run dev',
     fastapi: 'uvicorn main:app --reload',
     django: 'python manage.py runserver',
@@ -58,6 +100,7 @@ function defaultLaunchCommand(stack: string): string | undefined {
 function defaultBaseUrl(stack: string): string {
   const urls: Record<string, string> = {
     nextjs: 'http://localhost:3000',
+    vite: 'http://localhost:5173',
     express: 'http://localhost:3001',
     fastapi: 'http://localhost:8000',
     django: 'http://localhost:8000',
@@ -69,6 +112,7 @@ function defaultBaseUrl(stack: string): string {
 function defaultWatchPaths(stack: string): string[] {
   const paths: Record<string, string[]> = {
     nextjs: ['app', 'pages', 'src'],
+    vite: ['src'],
     express: ['src', '.'],
     fastapi: ['.'],
     django: ['.'],
@@ -131,10 +175,13 @@ export async function runInit(opts: InitOptions): Promise<void> {
     const detected = stackOverride ?? detectStack(projectRoot);
     if (!detected) {
       throw new Error(
-        'Could not detect stack. Use --stack=<nextjs|express|fastapi|django|openapi> to override.'
+        'Could not detect stack. Use --stack=<nextjs|vite|express|fastapi|django|openapi> to override.'
       );
     }
-    const detectedPort = detected === 'nextjs' ? detectNextjsDevPort(projectRoot) : undefined;
+    const detectedPort =
+      detected === 'nextjs' ? detectNextjsDevPort(projectRoot) :
+      detected === 'vite' ? detectViteDevPort(projectRoot) :
+      undefined;
     const baseUrl =
       opts.baseUrl ??
       (detectedPort !== undefined ? `http://localhost:${detectedPort}` : defaultBaseUrl(detected));

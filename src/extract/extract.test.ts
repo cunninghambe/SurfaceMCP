@@ -4,6 +4,7 @@ import { extractServerActions } from './nextjs/server-actions.js';
 import { extractExpressRoutes } from './express/static.js';
 import { extractDjangoRoutes } from './django/ast-walk.js';
 import { extractOpenApiRoutes } from './openapi/parse.js';
+import { extractPagesForStack } from './pages/index.js';
 import { resolve } from 'node:path';
 import { readFileSync } from 'node:fs';
 
@@ -213,6 +214,15 @@ describe('nextjs-app server-action extraction', () => {
       expect(t, `missing server action toolId=${expected.toolId}`).toBeDefined();
       expect(t!.inputSchemaConfidence).toBe(expected.inputSchemaConfidence);
     }
+  });
+});
+
+describe('nextjs-app surface_list_pages regression — backward compat', () => {
+  it('returns empty pages array (Next.js stack uses filesystem discovery via BugHunter, not surface_list_pages)', async () => {
+    const root = resolve(FIXTURES, 'nextjs-app');
+    const { pages, skips } = await extractPagesForStack('nextjs', root);
+    expect(pages).toEqual([]);
+    expect(skips).toEqual([]);
   });
 });
 

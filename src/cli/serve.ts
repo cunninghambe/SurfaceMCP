@@ -28,7 +28,7 @@ async function waitForBaseUrl(baseUrl: string, timeoutMs = 60_000): Promise<bool
 
 export async function runServe(opts: ServeOptions): Promise<void> {
   const projectRoot = resolve(opts.projectRoot ?? process.cwd());
-  const configPath = opts.configPath ?? findConfigPath(projectRoot);
+  const configPath = opts.configPath ?? process.env.SURFACEMCP_CONFIG ?? findConfigPath(projectRoot);
 
   loadEnvFiles(projectRoot);
   const config = loadConfig(configPath);

@@ -49,7 +49,58 @@ export type ToolCatalog = {
   tools: ToolMeta[];
 };
 
-export type Stack = 'nextjs' | 'express' | 'fastapi' | 'django' | 'openapi';
+export type Stack = 'nextjs' | 'express' | 'fastapi' | 'django' | 'openapi' | 'vite';
+
+export type Page = {
+  /**
+   * URL path as authored (e.g. '/', '/admin/users', '/users/:id').
+   * Case-preserved; param tokens use `:name` syntax (react-router style).
+   */
+  route: string;
+  /**
+   * Project-root-relative path to the source file declaring the component.
+   * Posix separators. Example: 'src/pages/Home.tsx'.
+   * Set to '<unresolved>' if the import could not be resolved.
+   */
+  sourceFile: string;
+  /**
+   * The component identifier as it appeared in the JSX `element={...}` slot,
+   * or the lazy-binding name. Optional because future stacks may not have a name.
+   */
+  componentName?: string;
+  /** True when the component was loaded via `React.lazy(() => import(...))`. */
+  lazy: boolean;
+  /**
+   * Names of dynamic params extracted from the route, in order.
+   * '/users/:id' → ['id']. Splat ('*') becomes the synthetic name '*'.
+   */
+  dynamicParams: string[];
+  /**
+   * Source file + line where the `<Route>` (or createBrowserRouter object) was declared.
+   * Project-root-relative.
+   */
+  declaredAt: { file: string; line: number };
+};
+
+export type PageCatalog = {
+  revision: number;
+  pages: Page[];
+};
+
+export type PageSkip = {
+  /** Best-effort route or component name; '<unknown>' when neither is known. */
+  route: string;
+  reason:
+    | 'dynamic_path'
+    | 'dynamic_route_array'
+    | 'unsupported_router_arg'
+    | 'duplicate_route'
+    | 'unresolved_component'
+    | 'unresolved_lazy_import'
+    | 'tab_state_routing_suspected';
+  detail?: string;
+  declaredAt?: { file: string; line: number };
+};
 
 export type AuthConfig =
   | { kind: 'none' }

@@ -1,0 +1,11 @@
+{
+  "pages": [
+    { "route": "/",               "sourceFile": "src/pages/Home.tsx",          "componentName": "Home",          "lazy": false, "dynamicParams": [] },
+    { "route": "/about",          "sourceFile": "src/pages/About.tsx",         "componentName": "About",         "lazy": true,  "dynamicParams": [] },
+    { "route": "/admin",          "sourceFile": "src/pages/AdminLayout.tsx",   "componentName": "AdminLayout",   "lazy": false, "dynamicParams": [] },
+    { "route": "/admin/users",    "sourceFile": "src/pages/AdminUsers.tsx",    "componentName": "AdminUsers",    "lazy": false, "dynamicParams": [] },
+    { "route": "/admin/settings", "sourceFile": "src/pages/AdminSettings.tsx", "componentName": "AdminSettings", "lazy": false, "dynamicParams": [] },
+    { "route": "/users/:id",      "sourceFile": "src/pages/UserDetail.tsx",    "componentName": "UserDetail",    "lazy": false, "dynamicParams": ["id"] }
+  ],
+  "skipsExpected": []
+}

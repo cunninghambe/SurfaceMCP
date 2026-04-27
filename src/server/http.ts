@@ -6,7 +6,7 @@ import { z } from 'zod';
 import { loadConfig, findConfigPath } from '../config.js';
 import { loadEnvFiles } from '../env/indirection.js';
 import { RoleMutex } from '../auth/role-mutex.js';
-import { getCatalog, getToolByName, getToolById, regenerateCatalog } from './tools-meta.js';
+import { getCatalog, getPageCatalog, getToolByName, getToolById, regenerateCatalog } from './tools-meta.js';
 import { executeCall } from './call.js';
 import { startWatcher } from '../watch/chokidar-driver.js';
 import { recoverFromZodError } from '../probe/zod-error.js';
@@ -246,6 +246,53 @@ function registerMetaTools(
       } catch (err) {
         return toolOk({ ok: false, error: String(err) });
       }
+    }
+  );
+
+  // surface_list_pages
+  server.tool(
+    'surface_list_pages',
+    'List discovered SPA pages for this surface. Returns empty for stacks without UI route discovery (express, fastapi, django, openapi when used standalone).',
+    {
+      filter: z
+        .object({
+          pathPrefix: z.string().optional(),
+          lazy: z.boolean().optional(),
+        })
+        .optional(),
+    },
+    async (args) => {
+      const pc = getPageCatalog();
+      let pages = pc.pages;
+      if (args.filter?.pathPrefix) {
+        const prefix = args.filter.pathPrefix;
+        pages = pages.filter((p) => p.route.startsWith(prefix));
+      }
+      if (typeof args.filter?.lazy === 'boolean') {
+        pages = pages.filter((p) => p.lazy === args.filter!.lazy);
+      }
+      return toolOk({ revision: pc.revision, pages });
+    }
+  );
+
+  // surface_describe_self
+  server.tool(
+    'surface_describe_self',
+    'Return non-secret metadata about this SurfaceMCP instance (stack, name, revision, capabilities).',
+    {},
+    async () => {
+      const c = getCatalog();
+      const pc = getPageCatalog();
+      return toolOk({
+        name: surface.name,
+        stack: surface.stack,
+        baseUrl: surface.baseUrl,
+        toolRevision: c.revision,
+        pageRevision: pc.revision,
+        capabilities: {
+          listPages: surface.stack === 'vite',
+        },
+      });
     }
   );
 
