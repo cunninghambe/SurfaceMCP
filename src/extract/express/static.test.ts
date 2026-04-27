@@ -206,3 +206,281 @@ describe('express schema scoping (static.test.ts)', () => {
     expect(post!.inputSchema.properties?.field).toBeDefined();
   });
 });
+
+// ─── Mount-resolution cases (8–18) ──────────────────────────────────────────
+
+describe('express mount resolution', () => {
+  function makeTmpDir(): string {
+    const dir = resolve(tmpdir(), `surfacemcp-mount-test-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    mkdirSync(dir, { recursive: true });
+    return dir;
+  }
+
+  const tmpDirs2: string[] = [];
+
+  afterAll(() => {
+    for (const dir of tmpDirs2) {
+      if (existsSync(dir)) rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('case 8 — simple mounted router (TraiderJo shape)', async () => {
+    const dir = makeTmpDir();
+    tmpDirs2.push(dir);
+
+    writeFileSync(resolve(dir, 'routes.js'), `
+      const router = require('express').Router();
+      router.get('/health', h);
+      router.post('/trades', h);
+      module.exports = router;
+    `, 'utf-8');
+
+    writeFileSync(resolve(dir, 'app.js'), `
+      const app = require('express')();
+      const r = require('./routes');
+      app.use('/api/v1', r);
+    `, 'utf-8');
+
+    const tools = await extractExpressRoutes(dir);
+    const paths = tools.map((t) => `${t.method} ${t.path}`);
+
+    expect(paths).toContain('GET /api/v1/health');
+    expect(paths).toContain('POST /api/v1/trades');
+    expect(paths).not.toContain('GET /health');
+    expect(paths).not.toContain('POST /trades');
+  });
+
+  it('case 9 — nested router.use(subPrefix, subRouter)', async () => {
+    const dir = makeTmpDir();
+    tmpDirs2.push(dir);
+
+    writeFileSync(resolve(dir, 'sub.js'), `
+      const sub = require('express').Router();
+      sub.get('/list', h);
+      module.exports = sub;
+    `, 'utf-8');
+
+    writeFileSync(resolve(dir, 'parent.js'), `
+      const parent = require('express').Router();
+      parent.get('/me', h);
+      parent.use('/items', require('./sub'));
+      module.exports = parent;
+    `, 'utf-8');
+
+    writeFileSync(resolve(dir, 'app.js'), `
+      const app = require('express')();
+      app.use('/api', require('./parent'));
+    `, 'utf-8');
+
+    const tools = await extractExpressRoutes(dir);
+    const paths = tools.map((t) => `${t.method} ${t.path}`);
+
+    expect(paths).toContain('GET /api/me');
+    expect(paths).toContain('GET /api/items/list');
+    expect(paths).not.toContain('GET /me');
+    expect(paths).not.toContain('GET /list');
+  });
+
+  it('case 10 — inline same-file Router with mount', async () => {
+    const dir = makeTmpDir();
+    tmpDirs2.push(dir);
+
+    writeFileSync(resolve(dir, 'app.js'), `
+      const app = require('express')();
+      const r = require('express').Router();
+      r.get('/x', h);
+      app.use('/y', r);
+    `, 'utf-8');
+
+    const tools = await extractExpressRoutes(dir);
+    const paths = tools.map((t) => `${t.method} ${t.path}`);
+
+    expect(paths).toContain('GET /y/x');
+    expect(paths).not.toContain('GET /x');
+  });
+
+  it('case 11 — default export, mounted (ESM)', async () => {
+    const dir = makeTmpDir();
+    tmpDirs2.push(dir);
+
+    writeFileSync(resolve(dir, 'sub.ts'), `
+      import { Router } from 'express';
+      const router = Router();
+      router.get('/foo', h);
+      export default router;
+    `, 'utf-8');
+
+    writeFileSync(resolve(dir, 'app.ts'), `
+      import sub from './sub.js';
+      const app = {} as any;
+      app.use('/api', sub);
+    `, 'utf-8');
+
+    const tools = await extractExpressRoutes(dir);
+    const paths = tools.map((t) => `${t.method} ${t.path}`);
+
+    expect(paths).toContain('GET /api/foo');
+  });
+
+  it('case 12 — named export with rename', async () => {
+    const dir = makeTmpDir();
+    tmpDirs2.push(dir);
+
+    writeFileSync(resolve(dir, 'sub.js'), `
+      const r = require('express').Router();
+      r.delete('/x', h);
+      module.exports = { mcpRouter: r };
+    `, 'utf-8');
+
+    writeFileSync(resolve(dir, 'app.js'), `
+      const { mcpRouter } = require('./sub');
+      const app = require('express')();
+      app.use('/mcp', mcpRouter);
+    `, 'utf-8');
+
+    const tools = await extractExpressRoutes(dir);
+    const paths = tools.map((t) => `${t.method} ${t.path}`);
+
+    expect(paths).toContain('DELETE /mcp/x');
+  });
+
+  it('case 13 — re-export barrel (CJS, TraiderJo shape)', async () => {
+    const dir = makeTmpDir();
+    tmpDirs2.push(dir);
+
+    mkdirSync(resolve(dir, 'moneybot'), { recursive: true });
+
+    writeFileSync(resolve(dir, 'moneybot', 'routes.js'), `
+      const router = require('express').Router();
+      router.post('/summaries/daily', h);
+      module.exports = router;
+    `, 'utf-8');
+
+    writeFileSync(resolve(dir, 'moneybot', 'index.js'), `
+      module.exports = { moneybotRouter: require('./routes') };
+    `, 'utf-8');
+
+    writeFileSync(resolve(dir, 'app.js'), `
+      const { moneybotRouter } = require('./moneybot');
+      const app = require('express')();
+      app.use('/api/v1', moneybotRouter);
+    `, 'utf-8');
+
+    const tools = await extractExpressRoutes(dir);
+    const paths = tools.map((t) => `${t.method} ${t.path}`);
+
+    expect(paths).toContain('POST /api/v1/summaries/daily');
+  });
+
+  it('case 13b — re-export barrel (ESM)', async () => {
+    const dir = makeTmpDir();
+    tmpDirs2.push(dir);
+
+    mkdirSync(resolve(dir, 'moneybot'), { recursive: true });
+
+    writeFileSync(resolve(dir, 'moneybot', 'routes.ts'), `
+      import { Router } from 'express';
+      const router = Router();
+      router.post('/summaries/daily', h);
+      export default router;
+    `, 'utf-8');
+
+    writeFileSync(resolve(dir, 'moneybot', 'index.ts'), `
+      export { default as moneybotRouter } from './routes.js';
+    `, 'utf-8');
+
+    writeFileSync(resolve(dir, 'app.ts'), `
+      import { moneybotRouter } from './moneybot/index.js';
+      const app = {} as any;
+      app.use('/api/v1', moneybotRouter);
+    `, 'utf-8');
+
+    const tools = await extractExpressRoutes(dir);
+    const paths = tools.map((t) => `${t.method} ${t.path}`);
+
+    expect(paths).toContain('POST /api/v1/summaries/daily');
+  });
+
+  it('case 14 — same router mounted twice under different prefixes', async () => {
+    const dir = makeTmpDir();
+    tmpDirs2.push(dir);
+
+    writeFileSync(resolve(dir, 'app.js'), `
+      const r = require('express').Router();
+      r.get('/ping', h);
+      const app = require('express')();
+      app.use('/v1', r);
+      app.use('/v2', r);
+    `, 'utf-8');
+
+    const tools = await extractExpressRoutes(dir);
+    const paths = tools.map((t) => `${t.method} ${t.path}`);
+
+    expect(paths).toContain('GET /v1/ping');
+    expect(paths).toContain('GET /v2/ping');
+  });
+
+  it('case 15 — mount with no prefix', async () => {
+    const dir = makeTmpDir();
+    tmpDirs2.push(dir);
+
+    writeFileSync(resolve(dir, 'app.js'), `
+      const r = require('express').Router();
+      r.get('/raw', h);
+      const app = require('express')();
+      app.use(r);
+    `, 'utf-8');
+
+    const tools = await extractExpressRoutes(dir);
+    const paths = tools.map((t) => `${t.method} ${t.path}`);
+
+    expect(paths).toContain('GET /raw');
+  });
+
+  it('case 16 — circular re-export (cycle safety)', async () => {
+    const dir = makeTmpDir();
+    tmpDirs2.push(dir);
+
+    writeFileSync(resolve(dir, 'a.js'), `module.exports = require('./b');`, 'utf-8');
+    writeFileSync(resolve(dir, 'b.js'), `module.exports = require('./a');`, 'utf-8');
+    writeFileSync(resolve(dir, 'app.js'), `
+      const app = require('express')();
+      app.use('/x', require('./a'));
+    `, 'utf-8');
+
+    await expect(extractExpressRoutes(dir)).resolves.toBeInstanceOf(Array);
+  });
+
+  it('case 17 — unresolved bare-import mount produces no /v1 routes', async () => {
+    const dir = makeTmpDir();
+    tmpDirs2.push(dir);
+
+    writeFileSync(resolve(dir, 'app.js'), `
+      const r = require('some-third-party-lib');
+      const app = require('express')();
+      app.use('/v1', r);
+    `, 'utf-8');
+
+    const tools = await extractExpressRoutes(dir);
+    const v1Routes = tools.filter((t) => t.path.startsWith('/v1'));
+
+    expect(v1Routes).toHaveLength(0);
+  });
+
+  it('case 18 — flat top-level routes (regression: bare-fallback path)', async () => {
+    const dir = makeTmpDir();
+    tmpDirs2.push(dir);
+
+    writeFileSync(resolve(dir, 'app.js'), `
+      const app = require('express')();
+      app.post('/users', handler);
+      app.get('/health', handler);
+    `, 'utf-8');
+
+    const tools = await extractExpressRoutes(dir);
+    const paths = tools.map((t) => `${t.method} ${t.path}`);
+
+    expect(paths).toContain('POST /users');
+    expect(paths).toContain('GET /health');
+  });
+});

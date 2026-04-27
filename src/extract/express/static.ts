@@ -1,9 +1,10 @@
-import { readdirSync, existsSync, readFileSync } from 'node:fs';
+import { readdirSync, existsSync } from 'node:fs';
 import { resolve, relative } from 'node:path';
 import { createHash } from 'node:crypto';
 import { Project, SyntaxKind, type CallExpression, type SourceFile } from 'ts-morph';
 import type { ToolMeta, SideEffectClass } from '../../types.js';
 import { resolveRouteSchema } from './schema-scope.js';
+import { buildMountIndex, joinPath } from './mounts.js';
 
 function toolId(method: string, path: string): string {
   return createHash('sha1')
@@ -39,59 +40,36 @@ type RouteCall = {
   sf?: SourceFile;
 };
 
-function extractRoutesFromFile(filePath: string): RouteCall[] {
+const HTTP_METHOD_RE = /\.(get|post|put|patch|delete|head|options)\s*$/;
+
+/**
+ * Extracts route calls from a single SourceFile using an existing ts-morph Project.
+ * Returns raw RouteCall objects; path prefixes are applied by the caller.
+ */
+function extractRouteCalls(sf: SourceFile, filePath: string): RouteCall[] {
   const routes: RouteCall[] = [];
-  let content: string;
-  try {
-    content = readFileSync(filePath, 'utf-8');
-  } catch {
-    return routes;
-  }
 
-  try {
-    const project = new Project({ useInMemoryFileSystem: false });
-    const sf = project.addSourceFileAtPath(filePath);
-    const calls: CallExpression[] = sf.getDescendantsOfKind(SyntaxKind.CallExpression);
+  for (const call of sf.getDescendantsOfKind(SyntaxKind.CallExpression)) {
+    const expr = call.getExpression();
+    const text = expr.getText();
+    const methodMatch = HTTP_METHOD_RE.exec(text);
+    if (!methodMatch) continue;
 
-    for (const call of calls) {
-      const expr = call.getExpression();
-      const text = expr.getText();
-      const methodMatch = /\.(get|post|put|patch|delete|head|options)\s*$/.exec(text);
-      if (!methodMatch) continue;
+    const args = call.getArguments();
+    if (args.length === 0) continue;
 
-      const args = call.getArguments();
-      if (args.length === 0) continue;
+    const firstArg = args[0];
+    const pathText = firstArg.getText().replace(/^['"`]|['"`]$/g, '');
+    if (!pathText.startsWith('/')) continue;
 
-      const firstArg = args[0];
-      const pathText = firstArg.getText().replace(/^['"`]|['"`]$/g, '');
-      if (!pathText.startsWith('/')) continue;
-
-      const pos = call.getStartLineNumber();
-      routes.push({
-        method: methodMatch[1].toUpperCase(),
-        path: pathText,
-        sourceFile: filePath,
-        sourceLine: pos,
-        callNode: call,
-        sf,
-      });
-    }
-  } catch {
-    // Fall back to regex — no AST nodes available
-    const routePattern = /\.(get|post|put|patch|delete)\s*\(['"`]([^'"` ]+)['"`]/gi;
-    let match: RegExpExecArray | null;
-    const lines = content.split('\n');
-    while ((match = routePattern.exec(content)) !== null) {
-      const lineIdx = content.slice(0, match.index).split('\n').length;
-      if (!match[2].startsWith('/')) continue;
-      routes.push({
-        method: match[1].toUpperCase(),
-        path: match[2],
-        sourceFile: filePath,
-        sourceLine: lineIdx,
-      });
-    }
-    void lines;
+    routes.push({
+      method: methodMatch[1].toUpperCase(),
+      path: pathText,
+      sourceFile: filePath,
+      sourceLine: call.getStartLineNumber(),
+      callNode: call,
+      sf,
+    });
   }
 
   return routes;
@@ -117,39 +95,66 @@ export async function extractExpressRoutes(
 ): Promise<ToolMeta[]> {
   const schemaConfig = bodyValidatorNames ? { bodyValidatorNames } : undefined;
   const allFiles = walkDir(root);
-  const rawRoutes: RouteCall[] = [];
 
+  // One Project for the entire extraction — shared by mount index + schema scope
+  const project = new Project({
+    useInMemoryFileSystem: false,
+    skipFileDependencyResolution: true,
+  });
   for (const file of allFiles) {
-    rawRoutes.push(...extractRoutesFromFile(file));
+    project.addSourceFileAtPath(file);
+  }
+
+  // Build mount prefix map: CallExpression -> string[] of absolute prefixes
+  const mountIndex = buildMountIndex(project);
+
+  // Collect all raw route calls across all files
+  const rawRoutes: RouteCall[] = [];
+  for (const sf of project.getSourceFiles()) {
+    rawRoutes.push(...extractRouteCalls(sf, sf.getFilePath()));
   }
 
   const nameCounts = new Map<string, number>();
   const tools: ToolMeta[] = [];
 
   for (const route of rawRoutes) {
-    const { schema, confidence } =
-      route.callNode && route.sf
-        ? await resolveRouteSchema(route.callNode, route.sf, route.method, schemaConfig)
-        : { schema: { type: 'object', additionalProperties: true } as const, confidence: 'unknown' as const };
+    const { callNode, sf } = route;
 
-    const base = pathToToolName(route.method, route.path);
-    const count = nameCounts.get(base) ?? 0;
-    nameCounts.set(base, count + 1);
-    const name = count === 0 ? base : `${base}_${count + 1}`;
+    // Determine the prefixes for this call node
+    const prefixes = callNode ? (mountIndex.get(callNode) ?? null) : null;
 
-    tools.push({
-      name,
-      toolId: toolId(route.method, route.path),
-      method: route.method,
-      path: route.path,
-      inputSchema: schema,
-      inputSchemaConfidence: confidence,
-      sideEffectClass: methodToSideEffect(route.method),
-      sourceFile: relative(root, route.sourceFile),
-      sourceLine: route.sourceLine,
-      isServerAction: false,
-    });
+    // Build the list of (method, path) pairs to emit
+    const emissions: { method: string; path: string }[] =
+      prefixes !== null
+        ? prefixes.map((p) => ({ method: route.method, path: joinPath(p, route.path) }))
+        : [{ method: route.method, path: route.path }];
+
+    for (const { method, path } of emissions) {
+      const { schema, confidence } =
+        callNode && sf
+          ? await resolveRouteSchema(callNode, sf, method, schemaConfig)
+          : { schema: { type: 'object', additionalProperties: true } as const, confidence: 'unknown' as const };
+
+      const base = pathToToolName(method, path);
+      const count = nameCounts.get(base) ?? 0;
+      nameCounts.set(base, count + 1);
+      const name = count === 0 ? base : `${base}_${count + 1}`;
+
+      tools.push({
+        name,
+        toolId: toolId(method, path),
+        method,
+        path,
+        inputSchema: schema,
+        inputSchemaConfidence: confidence,
+        sideEffectClass: methodToSideEffect(method),
+        sourceFile: relative(root, route.sourceFile),
+        sourceLine: route.sourceLine,
+        isServerAction: false,
+      });
+    }
   }
 
+  void zodAlias; // reserved for future zod alias config
   return tools;
 }
