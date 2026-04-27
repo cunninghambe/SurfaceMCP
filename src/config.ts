@@ -45,7 +45,7 @@ const AuthConfigSchema = z.discriminatedUnion('kind', [
 
 const RoleConfigSchema = z.object({
   name: z.string().min(1),
-  credentials: z.record(z.string()),
+  credentials: z.record(z.string()).optional(),
 });
 
 const SurfaceConfigSchema = z.object({
