@@ -250,11 +250,11 @@ function scanEsmDefaultExport(
   routerLocals: Set<string>,
   exportMap: Map<string, string>
 ): void {
-  const defaultExport = sf.getDefaultExportSymbol();
-  if (!defaultExport) return;
-  for (const d of defaultExport.getDeclarations()) {
-    if (!Node.isExportAssignment(d)) continue;
-    const expr = d.getExpression();
+  // Use AST descent rather than getDefaultExportSymbol() — the latter returns
+  // undefined for JS files when skipFileDependencyResolution is true.
+  for (const ea of sf.getDescendantsOfKind(SyntaxKind.ExportAssignment)) {
+    if (ea.isExportEquals()) continue;  // module.exports = x handled in CJS scan
+    const expr = ea.getExpression();
     if (Node.isIdentifier(expr)) {
       exportMap.set('__default__', expr.getText());
     } else if (isRouterCall(expr)) {
