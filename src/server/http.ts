@@ -18,6 +18,8 @@ import { log } from '../log.js';
 import { resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import type { ToolMeta, ProbeResult, SurfaceConfig } from '../types.js';
+import { buildDescribeAuth } from '../auth/describe-auth.js';
+import { isLoopbackRemote } from './loopback.js';
 
 function toolOk(data: unknown) {
   return { content: [{ type: 'text' as const, text: JSON.stringify(data) }] };
@@ -92,7 +94,8 @@ function registerMetaTools(
   server: McpServer,
   surface: SurfaceConfig,
   roleMutex: RoleMutex,
-  root: string
+  root: string,
+  httpReq?: Request
 ): void {
   // surface_list_tools
   server.tool(
@@ -249,6 +252,22 @@ function registerMetaTools(
     }
   );
 
+  // surface_describe_auth
+  server.tool(
+    'surface_describe_auth',
+    'Describe the auth configuration for a role, including resolved credentials, in a shape suitable for driving the in-browser login form. Returns sentinel values for roles that cannot be browser-logged-in (anonymous, bearer, api_key). LOOPBACK ONLY — credentials cross the wire; the SurfaceMCP HTTP server is bound to 127.0.0.1.',
+    { role: z.string().min(1).describe('Role name from surfacemcp.config.json roles[]') },
+    async (args) => {
+      if (httpReq && !isLoopbackRemote(httpReq)) {
+        return toolError('not_loopback', 'surface_describe_auth requires a loopback connection');
+      }
+      const role = surface.roles.find((r) => r.name === args.role);
+      if (!role) return toolError('not_found', `Unknown role: ${args.role}`);
+      log.info({ role: args.role, kind: surface.auth.kind }, 'describe_auth requested');
+      return toolOk(buildDescribeAuth(surface.auth, role));
+    }
+  );
+
   // surface_list_pages
   server.tool(
     'surface_list_pages',
@@ -381,7 +400,7 @@ export async function createApp(
 
     const catalog = getCatalog();
 
-    registerMetaTools(server, surface, roleMutex, root);
+    registerMetaTools(server, surface, roleMutex, root, req);
 
     // Register generated tools for each discovered route
     const { registerGeneratedTools } = await import('./tools-generated.js');

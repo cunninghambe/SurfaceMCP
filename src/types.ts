@@ -131,6 +131,14 @@ export type AuthConfig =
       loginFields: Record<string, string>;
       bodyFormat?: 'form' | 'json';
       successCheck: SuccessCheck;
+      /** UI route to navigate for in-browser login. Defaults to loginPath. */
+      uiLoginPath?: string;
+      /** DOM field-name overrides for UI login. Maps credentialKey -> domFieldName. Defaults to loginFields. */
+      uiLoginFields?: Record<string, string>;
+      /** CSS selector to click before the login form appears (e.g. a modal trigger). */
+      uiTriggerSelector?: string;
+      /** CSS selector for the submit button. Falls back to text-based discovery when unset. */
+      uiSubmitSelector?: string;
     }
   | {
       kind: 'nextauth';
@@ -139,9 +147,43 @@ export type AuthConfig =
       cookieName?: string;
       fields: Record<string, string>;
       callbackUrl?: string;
+      /** UI route to navigate for in-browser login. Defaults to '/api/auth/signin'. */
+      uiLoginPath?: string;
+      /** DOM field-name overrides for UI login. Maps credentialKey -> domFieldName. Defaults to inverted fields. */
+      uiLoginFields?: Record<string, string>;
+      /** CSS selector to click before the login form appears. */
+      uiTriggerSelector?: string;
+      /** CSS selector for the submit button. Falls back to text-based discovery when unset. */
+      uiSubmitSelector?: string;
     }
   | { kind: 'bearer' }
   | { kind: 'api_key'; header?: string; query?: string };
+
+export type DescribeAuthResult =
+  | { authKind: 'none'; reason: 'no_auth_configured' }
+  | { authKind: 'bearer'; reason: 'programmatic_only'; detail: string }
+  | { authKind: 'api_key'; reason: 'programmatic_only'; detail: string }
+  | { authKind: 'anonymous'; reason: 'role_has_no_credentials' }
+  | {
+      authKind: 'form';
+      uiLoginPath: string;
+      uiTriggerSelector?: string;
+      uiSubmitSelector?: string;
+      fields: Record<string, string>;
+      values: Record<string, string>;
+      successCheck: SuccessCheck;
+      cookieName?: string;
+    }
+  | {
+      authKind: 'nextauth';
+      uiLoginPath: string;
+      uiTriggerSelector?: string;
+      uiSubmitSelector?: string;
+      fields: Record<string, string>;
+      values: Record<string, string>;
+      successCheck: SuccessCheck;
+      cookieName: string;
+    };
 
 export type SuccessCheck =
   | { kind: 'redirect'; to: string }
