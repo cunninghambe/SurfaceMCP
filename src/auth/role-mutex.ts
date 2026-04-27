@@ -69,6 +69,17 @@ export class RoleMutex {
     let cookies: string[] = [];
     let token: string | undefined;
 
+    // Anonymous role: no credentials configured. Skip login regardless of auth.kind;
+    // requests go unauthenticated so we can exercise the public surface as the role.
+    if (!role.credentials || Object.keys(role.credentials).length === 0) {
+      return {
+        cookies: [],
+        token: undefined,
+        cachedAt: new Date().toISOString(),
+        refreshCount,
+      };
+    }
+
     switch (this.auth.kind) {
       case 'none':
         break;

@@ -85,7 +85,8 @@ export type SuccessCheck =
 
 export type RoleConfig = {
   name: string;
-  credentials: Record<string, string>;
+  /** Optional. A role without credentials is anonymous: no login flow, requests go unauthenticated. */
+  credentials?: Record<string, string>;
 };
 
 export type SurfaceConfig = {
