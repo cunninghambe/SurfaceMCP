@@ -26,7 +26,7 @@ export type JsonSchema2020 = {
   [key: string]: unknown;
 };
 
-export type InputSchemaConfidence = 'introspected' | 'inferred' | 'unknown';
+export type InputSchemaConfidence = 'introspected' | 'inferred' | 'partial' | 'unknown';
 export type SideEffectClass = 'safe' | 'mutating' | 'external';
 
 export type ToolMeta = {
