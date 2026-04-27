@@ -1,6 +1,7 @@
 # Build / runtime artefacts
 .next/
 node_modules/
+tsconfig.tsbuildinfo
 
 # BugHunter run artefacts
 .bughunter/
