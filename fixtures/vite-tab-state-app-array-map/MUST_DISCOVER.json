@@ -1,0 +1,8 @@
+{
+  "navigations": [
+    { "method": "state-setter", "target": "overview", "kind": "state", "stateVar": "tab", "label": "Overview", "confidence": "high" },
+    { "method": "state-setter", "target": "orders", "kind": "state", "stateVar": "tab", "label": "Orders", "confidence": "high" },
+    { "method": "state-setter", "target": "inventory", "kind": "state", "stateVar": "tab", "label": "Inventory", "confidence": "high" },
+    { "method": "state-setter", "target": "reports", "kind": "state", "stateVar": "tab", "label": "Reports", "confidence": "high" }
+  ]
+}
