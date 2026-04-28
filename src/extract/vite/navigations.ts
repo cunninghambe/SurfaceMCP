@@ -111,6 +111,8 @@ function preferredSelector(hint: {
 /** Extract label and hint from a trigger JSX element. */
 function extractTriggerInfo(trigger: Node): {
   label: string;
+  /** Raw JSX text content (not title fallback). Used as triggerSelectorHint.text. */
+  textContent: string;
   testId?: string;
   ariaLabel?: string;
   title?: string;
@@ -126,7 +128,7 @@ function extractTriggerInfo(trigger: Node): {
   const textContent = extractJsxLabel(trigger).trim();
   const label = textContent || titleAttr || '';
 
-  return { label, testId, ariaLabel, title: titleAttr };
+  return { label, textContent, testId, ariaLabel, title: titleAttr };
 }
 
 // ─── Pass A: <Link to="..."> and <NavLink to="..."> ─────────────────────────
@@ -354,9 +356,9 @@ function passC(
       continue;
     }
 
-    const { label, testId, ariaLabel, title } = extractTriggerInfo(trigger);
+    const { label, textContent, testId, ariaLabel, title } = extractTriggerInfo(trigger);
 
-    const hint = { text: label || undefined, testId, ariaLabel, title };
+    const hint = { text: textContent || undefined, testId, ariaLabel, title };
     navigations.push({
       label,
       method: 'router-push',
@@ -565,9 +567,9 @@ function passD(
         continue;
       }
 
-      const { label, testId, ariaLabel, title } = extractTriggerInfo(trigger);
+      const { label, textContent, testId, ariaLabel, title } = extractTriggerInfo(trigger);
 
-      const hint = { text: label || undefined, testId, ariaLabel, title };
+      const hint = { text: textContent || undefined, testId, ariaLabel, title };
       navigations.push({
         label,
         method: 'state-setter',

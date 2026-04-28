@@ -396,3 +396,427 @@ describe('Integration — vite-tab-state-app fixture', () => {
   });
 
 });
+
+// ─── Hint quality: preferred selector ────────────────────────────────────────
+
+describe('hint quality — preferred selector', () => {
+  it('preferred = testId when testId present', async () => {
+    const { navigations } = await extractFromSource(`
+      import { useState } from 'react';
+      export function App() {
+        const [tab, setTab] = useState<'a'|'b'>('a');
+        return <button data-testid="nav-a" onClick={() => setTab('a')}>A</button>;
+      }
+    `);
+    expect(navigations[0].triggerSelectorHint.preferred).toBe('testId');
+  });
+
+  it('preferred = ariaLabel when only ariaLabel present', async () => {
+    const { navigations } = await extractFromSource(`
+      import { useState } from 'react';
+      export function App() {
+        const [tab, setTab] = useState<'a'|'b'>('a');
+        return <button aria-label="Navigate A" onClick={() => setTab('a')}></button>;
+      }
+    `);
+    expect(navigations[0].triggerSelectorHint.preferred).toBe('ariaLabel');
+  });
+
+  it('preferred = text when only text present', async () => {
+    const { navigations } = await extractFromSource(`
+      import { useState } from 'react';
+      export function App() {
+        const [tab, setTab] = useState<'a'|'b'>('a');
+        return <button onClick={() => setTab('a')}>Go A</button>;
+      }
+    `);
+    expect(navigations[0].triggerSelectorHint.preferred).toBe('text');
+  });
+
+  it('preferred = title when only title present', async () => {
+    const { navigations } = await extractFromSource(`
+      import { useState } from 'react';
+      export function App() {
+        const [tab, setTab] = useState<'a'|'b'>('a');
+        return <button title="Switch to A" onClick={() => setTab('a')}></button>;
+      }
+    `);
+    expect(navigations[0].triggerSelectorHint.preferred).toBe('title');
+  });
+
+  it('preferred = testId beats all when all present', async () => {
+    const { navigations } = await extractFromSource(`
+      import { useState } from 'react';
+      export function App() {
+        const [tab, setTab] = useState<'a'|'b'>('a');
+        return (
+          <button
+            data-testid="nav-a"
+            aria-label="Navigate A"
+            title="Switch to A"
+            onClick={() => setTab('a')}
+          >
+            Go A
+          </button>
+        );
+      }
+    `);
+    expect(navigations[0].triggerSelectorHint.preferred).toBe('testId');
+    expect(navigations[0].triggerSelectorHint.testId).toBe('nav-a');
+    expect(navigations[0].triggerSelectorHint.ariaLabel).toBe('Navigate A');
+    expect(navigations[0].triggerSelectorHint.title).toBe('Switch to A');
+    expect(navigations[0].triggerSelectorHint.text).toBe('Go A');
+  });
+
+  it('preferred = undefined when no hint present', async () => {
+    const { navigations } = await extractFromSource(`
+      import { useState } from 'react';
+      export function App() {
+        const [tab, setTab] = useState<'a'|'b'>('a');
+        return <button onClick={() => setTab('a')}></button>;
+      }
+    `);
+    expect(navigations[0].triggerSelectorHint.preferred).toBeUndefined();
+  });
+});
+
+// ─── Hint quality: title attribute fallback ───────────────────────────────────
+
+describe('hint quality — title attribute fallback', () => {
+  it('extracts title="..." as a hint when textContent is empty', async () => {
+    const { navigations } = await extractFromSource(`
+      import { useState } from 'react';
+      export function App() {
+        const [tab, setTab] = useState<'a'|'b'>('a');
+        return (
+          <button title="Switch to B" onClick={() => setTab('b')}></button>
+        );
+      }
+    `);
+    expect(navigations).toHaveLength(1);
+    expect(navigations[0].triggerSelectorHint.title).toBe('Switch to B');
+    expect(navigations[0].triggerSelectorHint.preferred).toBe('title');
+  });
+});
+
+// ─── Scope classification ─────────────────────────────────────────────────────
+
+describe('scope classification', () => {
+  async function extractMultiFile(files: Record<string, string>) {
+    const project = new Project({
+      compilerOptions: { jsx: 4, allowJs: true, noEmit: true },
+      useInMemoryFileSystem: true,
+      skipAddingFilesFromTsConfig: true,
+    });
+    const fileList: string[] = [];
+    for (const [name, code] of Object.entries(files)) {
+      const path = `/root/src/${name}`;
+      project.createSourceFile(path, code);
+      fileList.push(path);
+    }
+    return extractViteNavigations('/root', project, {}, fileList);
+  }
+
+  it('classifies state-setter in App.tsx as top-level', async () => {
+    const { navigations } = await extractMultiFile({
+      'App.tsx': `
+        import { useState } from 'react';
+        type Tab = 'a' | 'b';
+        export function App() {
+          const [tab, setTab] = useState<Tab>('a');
+          return (
+            <div>
+              <button onClick={() => setTab('a')}>A</button>
+              <button onClick={() => setTab('b')}>B</button>
+            </div>
+          );
+        }
+      `,
+    });
+    expect(navigations.every(n => n.scope === 'top-level')).toBe(true);
+  });
+
+  it('classifies state-setter in pages/Dashboard.tsx as page-local', async () => {
+    const { navigations } = await extractMultiFile({
+      'App.tsx': `
+        import { useState } from 'react';
+        type Tab = 'dashboard' | 'settings';
+        export function App() {
+          const [tab, setTab] = useState<Tab>('dashboard');
+          return (
+            <div>
+              <button onClick={() => setTab('dashboard')}>Dashboard</button>
+              <button onClick={() => setTab('settings')}>Settings</button>
+            </div>
+          );
+        }
+      `,
+      'pages/Dashboard.tsx': `
+        import { useState } from 'react';
+        type Range = 'monthly' | 'hour';
+        export function Dashboard() {
+          const [range, setRange] = useState<Range>('monthly');
+          return (
+            <div>
+              <button onClick={() => setRange('monthly')}>monthly</button>
+              <button onClick={() => setRange('hour')}>hour</button>
+            </div>
+          );
+        }
+      `,
+    });
+    const appNavs = navigations.filter(n => n.sourceFile.includes('App.tsx'));
+    const dashNavs = navigations.filter(n => n.sourceFile.includes('Dashboard.tsx'));
+    expect(appNavs.every(n => n.scope === 'top-level')).toBe(true);
+    expect(dashNavs.every(n => n.scope === 'page-local')).toBe(true);
+  });
+
+  it('classifies <Link> in pages/Dashboard.tsx as top-level (URL navs are always top-level)', async () => {
+    const { navigations } = await extractMultiFile({
+      'App.tsx': `
+        import { useState } from 'react';
+        type Tab = 'a' | 'b';
+        export function App() {
+          const [tab, setTab] = useState<Tab>('a');
+          return <div><button onClick={() => setTab('a')}>A</button><button onClick={() => setTab('b')}>B</button></div>;
+        }
+      `,
+      'pages/Dashboard.tsx': `
+        import { Link } from 'react-router-dom';
+        export function Dashboard() {
+          return <Link to="/about">About</Link>;
+        }
+      `,
+    });
+    const linkNav = navigations.find(n => n.method === 'router-link');
+    expect(linkNav?.scope).toBe('top-level');
+  });
+
+  it('classifies <a href="#x"> as top-level (hash navs)', async () => {
+    const { navigations } = await extractFromSource(`
+      export function Nav() {
+        return <a href="#section">Section</a>;
+      }
+    `);
+    expect(navigations[0].scope).toBe('top-level');
+  });
+
+  it('falls back to top-level when neither App.tsx nor pages/ convention found', async () => {
+    const { navigations } = await extractMultiFile({
+      'Foo.tsx': `
+        import { useState } from 'react';
+        export function Foo() {
+          const [x, setX] = useState<'a'|'b'>('a');
+          return <button onClick={() => setX('a')}>A</button>;
+        }
+      `,
+    });
+    expect(navigations[0].scope).toBe('top-level');
+  });
+});
+
+// ─── Sibling-navigation counting ─────────────────────────────────────────────
+
+describe('siblingNavigations counting', () => {
+  it('siblingNavigations = 0 when text is unique in scope', async () => {
+    const { navigations } = await extractFromSource(`
+      import { useState } from 'react';
+      export function App() {
+        const [tab, setTab] = useState<'a'|'b'>('a');
+        return (
+          <div>
+            <button onClick={() => setTab('a')}>UniqueA</button>
+            <button onClick={() => setTab('b')}>UniqueB</button>
+          </div>
+        );
+      }
+    `);
+    expect(navigations.every(n => n.siblingNavigations === 0)).toBe(true);
+  });
+
+  it('siblingNavigations = 2 when 3 navs share text in same scope', async () => {
+    const { navigations } = await extractFromSource(`
+      import { useState } from 'react';
+      type R = 'a' | 'b' | 'c';
+      export function App() {
+        const [r, setR] = useState<R>('a');
+        return (
+          <div>
+            <button onClick={() => setR('a')}>Save</button>
+            <button onClick={() => setR('b')}>Save</button>
+            <button onClick={() => setR('c')}>Save</button>
+          </div>
+        );
+      }
+    `);
+    expect(navigations.every(n => n.siblingNavigations === 2)).toBe(true);
+  });
+
+  it('siblingNavigations counts case-insensitively after trim', async () => {
+    const { navigations } = await extractFromSource(`
+      import { useState } from 'react';
+      export function App() {
+        const [tab, setTab] = useState<'a'|'b'>('a');
+        return (
+          <div>
+            <button onClick={() => setTab('a')}>Save</button>
+            <button onClick={() => setTab('b')}>  save  </button>
+          </div>
+        );
+      }
+    `);
+    expect(navigations.every(n => n.siblingNavigations === 1)).toBe(true);
+  });
+
+  it('siblingNavigations is per-scope, not global', async () => {
+    const project = new Project({
+      compilerOptions: { jsx: 4, allowJs: true, noEmit: true },
+      useInMemoryFileSystem: true,
+      skipAddingFilesFromTsConfig: true,
+    });
+    project.createSourceFile('/root/src/App.tsx', `
+      import { useState } from 'react';
+      type Tab = 'a' | 'b';
+      export function App() {
+        const [tab, setTab] = useState<Tab>('a');
+        return (
+          <div>
+            <button onClick={() => setTab('a')}>About</button>
+            <button onClick={() => setTab('b')}>About</button>
+          </div>
+        );
+      }
+    `);
+    project.createSourceFile('/root/src/pages/Sub.tsx', `
+      import { useState } from 'react';
+      export function Sub() {
+        const [x, setX] = useState<'a'|'b'>('a');
+        return <button onClick={() => setX('a')}>About</button>;
+      }
+    `);
+    const { navigations } = await extractViteNavigations('/root', project, {}, [
+      '/root/src/App.tsx',
+      '/root/src/pages/Sub.tsx',
+    ]);
+    const topLevel = navigations.filter(n => n.scope === 'top-level');
+    const pageLocal = navigations.filter(n => n.scope === 'page-local');
+    expect(topLevel.every(n => n.siblingNavigations === 1)).toBe(true);
+    expect(pageLocal.every(n => n.siblingNavigations === 0)).toBe(true);
+  });
+
+  it('confidence drops high→medium when siblings exist AND preferred = text', async () => {
+    const { navigations } = await extractFromSource(`
+      import { useState } from 'react';
+      export function App() {
+        const [tab, setTab] = useState<'a'|'b'>('a');
+        return (
+          <div>
+            <button onClick={() => setTab('a')}>Save</button>
+            <button onClick={() => setTab('b')}>Save</button>
+          </div>
+        );
+      }
+    `);
+    expect(navigations.every(n => n.confidence === 'medium')).toBe(true);
+  });
+
+  it('confidence stays high when siblings exist BUT preferred = testId', async () => {
+    const { navigations } = await extractFromSource(`
+      import { useState } from 'react';
+      export function App() {
+        const [tab, setTab] = useState<'a'|'b'>('a');
+        return (
+          <div>
+            <button data-testid="btn-a" onClick={() => setTab('a')}>Save</button>
+            <button data-testid="btn-b" onClick={() => setTab('b')}>Save</button>
+          </div>
+        );
+      }
+    `);
+    expect(navigations.every(n => n.confidence === 'high')).toBe(true);
+  });
+});
+
+// ─── Cross-file duplicate count ───────────────────────────────────────────────
+
+describe('duplicateCount', () => {
+  it('duplicateCount = 0 when (method, target, kind, scope) is unique', async () => {
+    const { navigations } = await extractFromSource(`
+      import { useState } from 'react';
+      export function App() {
+        const [tab, setTab] = useState<'a'|'b'>('a');
+        return (
+          <div>
+            <button onClick={() => setTab('a')}>A</button>
+            <button onClick={() => setTab('b')}>B</button>
+          </div>
+        );
+      }
+    `);
+    expect(navigations.every(n => n.duplicateCount === 0)).toBe(true);
+  });
+
+  it('duplicateCount = N-1 when N entries share the quadruple', async () => {
+    const project = new Project({
+      compilerOptions: { jsx: 4, allowJs: true, noEmit: true },
+      useInMemoryFileSystem: true,
+      skipAddingFilesFromTsConfig: true,
+    });
+    project.createSourceFile('/root/src/Nav1.tsx', `
+      import { Link } from 'react-router-dom';
+      export function Nav1() { return <Link to="/about">About</Link>; }
+    `);
+    project.createSourceFile('/root/src/Nav2.tsx', `
+      import { Link } from 'react-router-dom';
+      export function Nav2() { return <Link to="/about">About 2</Link>; }
+    `);
+    project.createSourceFile('/root/src/Nav3.tsx', `
+      import { Link } from 'react-router-dom';
+      export function Nav3() { return <Link to="/about">About 3</Link>; }
+    `);
+    const { navigations } = await extractViteNavigations('/root', project, {}, [
+      '/root/src/Nav1.tsx', '/root/src/Nav2.tsx', '/root/src/Nav3.tsx',
+    ]);
+    const aboutNavs = navigations.filter(n => n.target === '/about');
+    expect(aboutNavs).toHaveLength(3);
+    expect(aboutNavs.every(n => n.duplicateCount === 2)).toBe(true);
+  });
+
+  it('duplicateCount considers all 4 fields — different scopes do not collide', async () => {
+    const project = new Project({
+      compilerOptions: { jsx: 4, allowJs: true, noEmit: true },
+      useInMemoryFileSystem: true,
+      skipAddingFilesFromTsConfig: true,
+    });
+    // App.tsx: top-level tab with target 'dashboard'
+    project.createSourceFile('/root/src/App.tsx', `
+      import { useState } from 'react';
+      type Tab = 'dashboard' | 'settings';
+      export function App() {
+        const [tab, setTab] = useState<Tab>('dashboard');
+        return (
+          <div>
+            <button onClick={() => setTab('dashboard')}>Dashboard</button>
+            <button onClick={() => setTab('settings')}>Settings</button>
+          </div>
+        );
+      }
+    `);
+    // pages/Sub.tsx: page-local tab also with target 'dashboard'
+    project.createSourceFile('/root/src/pages/Sub.tsx', `
+      import { useState } from 'react';
+      export function Sub() {
+        const [x, setX] = useState<'dashboard'|'b'>('dashboard');
+        return <button onClick={() => setX('dashboard')}>Dashboard</button>;
+      }
+    `);
+    const { navigations } = await extractViteNavigations('/root', project, {}, [
+      '/root/src/App.tsx', '/root/src/pages/Sub.tsx',
+    ]);
+    // Top-level 'dashboard' and page-local 'dashboard' should NOT collide
+    const topDash = navigations.find(n => n.target === 'dashboard' && n.scope === 'top-level');
+    const localDash = navigations.find(n => n.target === 'dashboard' && n.scope === 'page-local');
+    expect(topDash?.duplicateCount).toBe(0);
+    expect(localDash?.duplicateCount).toBe(0);
+  });
+});
