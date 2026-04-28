@@ -275,10 +275,20 @@ export type Navigation = {
     text?: string;
     testId?: string;
     ariaLabel?: string;
+    /** title="..." attribute as a last-resort hint. */
+    title?: string;
+    /** The strongest available selector field. Derived; never overrides explicit values. */
+    preferred?: 'testId' | 'ariaLabel' | 'text' | 'title';
   };
   sourceFile: string;          // project-root-relative
   sourceLine: number;
   confidence: NavigationConfidence;
+  /** 'top-level' = reachable from any URL; 'page-local' = only after navigating to the parent page. */
+  scope?: 'top-level' | 'page-local';
+  /** Number of OTHER navigations in the same scope that share this text hint (case-insensitive). 0 = unique. */
+  siblingNavigations?: number;
+  /** Number of OTHER navigations across all files that share (method, target, kind, scope). 0 = unique. */
+  duplicateCount?: number;
 };
 
 export type NavigationCatalog = {
