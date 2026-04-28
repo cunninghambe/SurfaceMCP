@@ -297,6 +297,42 @@ describe('vite-tab-state-app-deep navigation extraction', () => {
   });
 });
 
+describe('vite-tab-state-app-ambiguous navigation extraction', () => {
+  it('discovers 3 navigations with sibling-counting applied', async () => {
+    const root = resolve(FIXTURES, 'vite-tab-state-app-ambiguous');
+    const { navigations } = await extractViteNavigations(root);
+    const must = JSON.parse(readFileSync(resolve(FIXTURES, 'vite-tab-state-app-ambiguous', 'MUST_DISCOVER.json'), 'utf-8')) as {
+      navigations: Array<{ target: string; siblingNavigations: number; confidence: string; scope: string }>;
+    };
+    expect(navigations).toHaveLength(3);
+    for (const expected of must.navigations) {
+      const found = navigations.find(n => n.target === expected.target);
+      expect(found, `Missing navigation: ${expected.target}`).toBeDefined();
+      expect(found!.siblingNavigations).toBe(expected.siblingNavigations);
+      expect(found!.confidence).toBe(expected.confidence);
+      expect(found!.scope).toBe(expected.scope);
+    }
+  });
+
+  it('target=c keeps high confidence because it has a testId (preferred not text)', async () => {
+    const root = resolve(FIXTURES, 'vite-tab-state-app-ambiguous');
+    const { navigations } = await extractViteNavigations(root);
+    const navC = navigations.find(n => n.target === 'c');
+    expect(navC).toBeDefined();
+    expect(navC!.confidence).toBe('high');
+    expect(navC!.triggerSelectorHint.preferred).toBe('testId');
+  });
+
+  it('targets a and b drop to medium confidence (preferred=text, siblings > 0)', async () => {
+    const root = resolve(FIXTURES, 'vite-tab-state-app-ambiguous');
+    const { navigations } = await extractViteNavigations(root);
+    const navA = navigations.find(n => n.target === 'a');
+    const navB = navigations.find(n => n.target === 'b');
+    expect(navA!.confidence).toBe('medium');
+    expect(navB!.confidence).toBe('medium');
+  });
+});
+
 describe('monorepo multi-surface detection', () => {
   it('detects nextjs in apps/web', async () => {
     const { detectStack } = await import('../detect/index.js');

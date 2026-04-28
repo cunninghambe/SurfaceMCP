@@ -1,0 +1,7 @@
+{
+  "navigations": [
+    { "target": "a", "siblingNavigations": 2, "confidence": "medium", "scope": "top-level" },
+    { "target": "b", "siblingNavigations": 2, "confidence": "medium", "scope": "top-level" },
+    { "target": "c", "siblingNavigations": 2, "confidence": "high", "scope": "top-level" }
+  ]
+}
