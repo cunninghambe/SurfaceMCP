@@ -352,7 +352,7 @@ function registerMetaTools(
   // surface_list_navigations
   server.tool(
     'surface_list_navigations',
-    'List statically-discovered SPA navigations (links, router pushes, tab-state setters). Empty for stacks without UI route discovery.',
+    'List statically-discovered SPA navigations (links, router pushes, tab-state setters). Each entry includes scope (top-level/page-local), preferred selector hint, siblingNavigations count, and duplicateCount. Results are sorted by confidence desc. Empty for stacks without UI route discovery.',
     {
       filter: z.object({
         method: z.enum(['link', 'router-link', 'router-push', 'state-setter']).optional(),
