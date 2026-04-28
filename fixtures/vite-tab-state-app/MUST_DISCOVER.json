@@ -1,0 +1,8 @@
+{
+  "navigations": [
+    { "method": "state-setter", "target": "dashboard", "label": "Dashboard", "stateVar": "tab", "confidence": "high" },
+    { "method": "state-setter", "target": "trades", "label": "Trades", "stateVar": "tab", "confidence": "high" },
+    { "method": "state-setter", "target": "settings", "label": "Settings", "stateVar": "tab", "triggerSelectorHint.testId": "nav-settings", "confidence": "high" },
+    { "method": "state-setter", "target": "profile", "label": "Profile", "stateVar": "tab", "triggerSelectorHint.ariaLabel": "My profile", "confidence": "high" }
+  ]
+}
