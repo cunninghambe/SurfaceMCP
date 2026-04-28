@@ -296,3 +296,53 @@ export type NavigationSkip = {
   detail?: string;
   declaredAt?: { file: string; line: number };
 };
+
+// ─── Runtime route enumeration types ─────────────────────────────────────────
+
+export type DetectedRouterName =
+  | 'tanstack-router'
+  | 'react-router-v6'
+  | 'react-router-v5'
+  | 'wouter'
+  | 'vue-router'
+  | 'next-router'
+  | 'none';
+
+export type RuntimeRoute = {
+  /** Route path in react-router-v6 syntax: '/users/:id', '/admin/*'. */
+  path: string;
+  /** Param names extracted from path. */
+  params: string[];
+};
+
+export type DetectedRouter = {
+  name: DetectedRouterName;
+  version?: string;
+  routes: RuntimeRoute[];
+};
+
+export type RuntimeEnumerationError = {
+  detector: DetectedRouterName;
+  message: string;
+};
+
+export type RuntimeEnumerationRaw = {
+  routers: DetectedRouter[];
+  errors: RuntimeEnumerationError[];
+  elapsedMs: number;
+};
+
+export type PostprocessedRoute = RuntimeRoute & {
+  source: DetectedRouterName;
+};
+
+export type PostprocessedResult = {
+  routes: PostprocessedRoute[];
+  summary: {
+    detectedRouters: DetectedRouterName[];
+    errorCount: number;
+    totalRoutes: number;
+    dedupedRoutes: number;
+    fellBackToNone: boolean;
+  };
+};

@@ -8,6 +8,8 @@ import { loadEnvFiles } from '../env/indirection.js';
 import { RoleMutex } from '../auth/role-mutex.js';
 import { getCatalog, getPageCatalog, getToolByName, getToolById, regenerateCatalog } from './tools-meta.js';
 import { getNavigationCatalog } from './navigation-catalog.js';
+import { getRuntimeEnumScript, RUNTIME_ENUM_VERSION } from '../runtime-enum/script.js';
+import { postprocessRuntimeRoutes } from '../runtime-enum/postprocess.js';
 import { executeCall } from './call.js';
 import { startWatcher } from '../watch/chokidar-driver.js';
 import { recoverFromZodError } from '../probe/zod-error.js';
@@ -21,6 +23,28 @@ import { pathToFileURL } from 'node:url';
 import type { ToolMeta, ProbeResult, SurfaceConfig } from '../types.js';
 import { buildDescribeAuth } from '../auth/describe-auth.js';
 import { isLoopbackRemote } from './loopback.js';
+
+const RUNTIME_ENUM_SCHEMA = {
+  $schema: 'https://json-schema.org/draft/2020-12/schema',
+  type: 'object',
+  properties: {
+    routers: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: {
+          name: { enum: ['tanstack-router', 'react-router-v6', 'react-router-v5', 'wouter', 'vue-router', 'next-router', 'none'] },
+          version: { type: 'string' },
+          routes: { type: 'array', items: { type: 'object', properties: { path: { type: 'string' }, params: { type: 'array', items: { type: 'string' } } } } },
+        },
+        required: ['name', 'routes'],
+      },
+    },
+    errors: { type: 'array', items: { type: 'object', properties: { detector: { type: 'string' }, message: { type: 'string' } } } },
+    elapsedMs: { type: 'number' },
+  },
+  required: ['routers', 'errors', 'elapsedMs'],
+};
 
 function toolOk(data: unknown) {
   return { content: [{ type: 'text' as const, text: JSON.stringify(data) }] };
@@ -295,6 +319,36 @@ function registerMetaTools(
     }
   );
 
+  // surface_enumerate_routes_runtime
+  server.tool(
+    'surface_enumerate_routes_runtime',
+    'Returns a self-contained JS script (string) that, when injected into the SPA via browser.evaluate(...), enumerates the live router\'s route table.',
+    {},
+    async () => {
+      return toolOk({
+        version: RUNTIME_ENUM_VERSION,
+        script: getRuntimeEnumScript(),
+        timeoutMs: 5000,
+        expectedSchema: RUNTIME_ENUM_SCHEMA,
+      });
+    }
+  );
+
+  // surface_postprocess_runtime_routes
+  server.tool(
+    'surface_postprocess_runtime_routes',
+    'Validate, normalise, and dedup the raw output of the runtime-enum script. Returns a normalized route list.',
+    {
+      raw: z.unknown().describe('Output of evaluating the script returned by surface_enumerate_routes_runtime.'),
+    },
+    async (args) => {
+      const result = postprocessRuntimeRoutes(args.raw, {
+        excludedRoutes: surface.excludedRoutes ?? [],
+      });
+      return toolOk(result);
+    }
+  );
+
   // surface_list_navigations
   server.tool(
     'surface_list_navigations',
@@ -331,6 +385,7 @@ function registerMetaTools(
         capabilities: {
           listPages: surface.stack === 'vite',
           listNavigations: surface.stack === 'vite',
+          enumerateRoutesRuntime: true,
           crawlSeed: surface.stack === 'vite',
         },
       });

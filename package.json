@@ -8,7 +8,7 @@
     "surfacemcp": "./dist/cli/main.js"
   },
   "scripts": {
-    "build": "node_modules/.bin/tsc",
+    "build": "node_modules/.bin/tsc && mkdir -p dist/runtime-enum && cp src/runtime-enum/*.runtime.js dist/runtime-enum/",
     "start": "node dist/server/http.js",
     "dev": "node_modules/.bin/tsx watch src/server/http.ts",
     "typecheck": "node_modules/.bin/tsc --noEmit",
