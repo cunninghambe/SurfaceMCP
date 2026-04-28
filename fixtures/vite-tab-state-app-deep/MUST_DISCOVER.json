@@ -1,0 +1,8 @@
+{
+  "navigations": [
+    { "method": "state-setter", "target": "dashboard", "scope": "top-level", "stateVar": "tab", "siblingNavigations": 0 },
+    { "method": "state-setter", "target": "settings", "scope": "top-level", "stateVar": "tab", "siblingNavigations": 0 },
+    { "method": "state-setter", "target": "monthly", "scope": "page-local", "stateVar": "range", "siblingNavigations": 0 },
+    { "method": "state-setter", "target": "hour", "scope": "page-local", "stateVar": "range", "siblingNavigations": 0 }
+  ]
+}

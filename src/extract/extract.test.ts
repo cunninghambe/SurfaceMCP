@@ -264,6 +264,39 @@ describe('vite-tab-state-app navigation extraction', () => {
   });
 });
 
+describe('vite-tab-state-app-deep navigation extraction', () => {
+  it('classifies App.tsx setters as top-level', async () => {
+    const root = resolve(FIXTURES, 'vite-tab-state-app-deep');
+    const { navigations } = await extractViteNavigations(root);
+    const appNavs = navigations.filter(n => n.sourceFile.includes('App.tsx'));
+    expect(appNavs.length).toBeGreaterThan(0);
+    expect(appNavs.every(n => n.scope === 'top-level')).toBe(true);
+  });
+
+  it('classifies pages/Dashboard.tsx setters as page-local', async () => {
+    const root = resolve(FIXTURES, 'vite-tab-state-app-deep');
+    const { navigations } = await extractViteNavigations(root);
+    const dashNavs = navigations.filter(n => n.sourceFile.includes('Dashboard.tsx'));
+    expect(dashNavs.length).toBeGreaterThan(0);
+    expect(dashNavs.every(n => n.scope === 'page-local')).toBe(true);
+  });
+
+  it('discovers all must-discover navigations with correct scope and stateVar', async () => {
+    const root = resolve(FIXTURES, 'vite-tab-state-app-deep');
+    const { navigations } = await extractViteNavigations(root);
+    const must = JSON.parse(readFileSync(resolve(FIXTURES, 'vite-tab-state-app-deep', 'MUST_DISCOVER.json'), 'utf-8')) as {
+      navigations: Array<{ method: string; target: string; scope: string; stateVar: string; siblingNavigations: number }>;
+    };
+    for (const expected of must.navigations) {
+      const found = navigations.find(n => n.target === expected.target && n.method === expected.method);
+      expect(found, `Missing navigation: ${expected.method}/${expected.target}`).toBeDefined();
+      expect(found!.scope).toBe(expected.scope);
+      expect(found!.stateVar).toBe(expected.stateVar);
+      expect(found!.siblingNavigations).toBe(expected.siblingNavigations);
+    }
+  });
+});
+
 describe('monorepo multi-surface detection', () => {
   it('detects nextjs in apps/web', async () => {
     const { detectStack } = await import('../detect/index.js');
