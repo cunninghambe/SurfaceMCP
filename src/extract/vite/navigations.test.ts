@@ -335,14 +335,10 @@ describe('Pass D — tab-state setter detection (state-setter)', () => {
 });
 
 describe('Synthetic page emission', () => {
-  it('synthetic-page — tab-state produces /?tab=value pages', async () => {
+  it('emits no synthetic /?<state>= pages — state lives only in navigations', async () => {
     const root = resolve(FIXTURES, 'vite-tab-state-app');
     const { pages } = await extractVitePages(root);
-    const routes = new Set(pages.map(p => p.route));
-    expect(routes.has('/?tab=dashboard')).toBe(true);
-    expect(routes.has('/?tab=trades')).toBe(true);
-    expect(routes.has('/?tab=settings')).toBe(true);
-    expect(routes.has('/?tab=profile')).toBe(true);
+    expect(pages.every(p => !p.route.startsWith('/?'))).toBe(true);
   });
 });
 
@@ -399,10 +395,4 @@ describe('Integration — vite-tab-state-app fixture', () => {
     expect(profile?.triggerSelectorHint.ariaLabel).toBe('My profile');
   });
 
-  it('synthesizes 4 synthetic pages', async () => {
-    const root = resolve(FIXTURES, 'vite-tab-state-app');
-    const { pages } = await extractVitePages(root);
-    const syntheticRoutes = pages.filter(p => p.route.startsWith('/?'));
-    expect(syntheticRoutes).toHaveLength(4);
-  });
 });

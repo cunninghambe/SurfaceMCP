@@ -248,7 +248,6 @@ describe('vite-tab-state-app navigation extraction', () => {
     const { navigations } = await extractViteNavigations(root);
     const must = JSON.parse(readFileSync(resolve(FIXTURES, 'vite-tab-state-app', 'MUST_DISCOVER.json'), 'utf-8')) as {
       navigations: Array<{ method: string; target: string; label: string; stateVar: string; confidence: string }>;
-      syntheticPages: Array<{ route: string }>;
     };
     for (const expected of must.navigations) {
       const found = navigations.find(n => n.target === expected.target && n.method === expected.method);
@@ -258,17 +257,10 @@ describe('vite-tab-state-app navigation extraction', () => {
     }
   });
 
-  it('synthesizes one tab-state page per state value', async () => {
+  it('emits no synthetic /?<state>= pages — state lives only in navigations', async () => {
     const root = resolve(FIXTURES, 'vite-tab-state-app');
     const { pages } = await extractVitePages(root);
-    const must = JSON.parse(readFileSync(resolve(FIXTURES, 'vite-tab-state-app', 'MUST_DISCOVER.json'), 'utf-8')) as {
-      navigations: unknown[];
-      syntheticPages: Array<{ route: string }>;
-    };
-    const routes = new Set(pages.map(p => p.route));
-    for (const expected of must.syntheticPages) {
-      expect(routes.has(expected.route), `Missing synthetic page: ${expected.route}`).toBe(true);
-    }
+    expect(pages.every(p => !p.route.startsWith('/?'))).toBe(true);
   });
 });
 

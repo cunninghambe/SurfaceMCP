@@ -14,7 +14,7 @@ import {
 import { glob } from 'tinyglobby';
 import { existsSync, readFileSync } from 'node:fs';
 import { resolve, relative } from 'node:path';
-import type { Page, PageSkip, Navigation } from '../../types.js';
+import type { Page, PageSkip } from '../../types.js';
 import {
   loadPathsMap,
   resolveImportSpecifier,
@@ -654,16 +654,6 @@ export async function extractVitePages(root: string): Promise<{ pages: Page[]; s
     }
   }
 
-  // Merge synthetic tab-state pages from navigation extractor
-  const { extractViteNavigations } = await import('./navigations.js');
-  const { navigations: navs } = await extractViteNavigations(root, project, pathsMap, sortedFiles);
-  const syntheticPages = synthesizeTabStatePages(navs);
-  for (const sp of syntheticPages) {
-    if (!dedupedPages.some(p => p.route === sp.route)) {
-      dedupedPages.push(sp);
-    }
-  }
-
   // Sort by (route, componentName) for determinism
   dedupedPages.sort((a, b) => {
     const rc = a.route.localeCompare(b.route);
@@ -674,24 +664,3 @@ export async function extractVitePages(root: string): Promise<{ pages: Page[]; s
   return { pages: dedupedPages, skips: allSkips };
 }
 
-/**
- * Converts tab-state navigations into synthetic Page entries with query-string routes.
- * Called from extractVitePages after navigation extraction completes.
- */
-export function synthesizeTabStatePages(navigations: Navigation[]): Page[] {
-  const stateNavs = navigations.filter(n => n.kind === 'state' && n.stateVar);
-  const result: Page[] = [];
-  for (const nav of stateNavs) {
-    const route = `/?${encodeURIComponent(nav.stateVar!)}=${encodeURIComponent(nav.target)}`;
-    result.push({
-      route,
-      sourceFile: nav.sourceFile,
-      componentName: undefined,
-      lazy: false,
-      dynamicParams: [],
-      declaredAt: { file: nav.sourceFile, line: nav.sourceLine },
-      source: 'static',
-    });
-  }
-  return result;
-}
