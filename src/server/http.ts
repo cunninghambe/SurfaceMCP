@@ -7,6 +7,7 @@ import { loadConfig, findConfigPath } from '../config.js';
 import { loadEnvFiles } from '../env/indirection.js';
 import { RoleMutex } from '../auth/role-mutex.js';
 import { getCatalog, getPageCatalog, getToolByName, getToolById, regenerateCatalog } from './tools-meta.js';
+import { getNavigationCatalog } from './navigation-catalog.js';
 import { executeCall } from './call.js';
 import { startWatcher } from '../watch/chokidar-driver.js';
 import { recoverFromZodError } from '../probe/zod-error.js';
@@ -294,6 +295,25 @@ function registerMetaTools(
     }
   );
 
+  // surface_list_navigations
+  server.tool(
+    'surface_list_navigations',
+    'List statically-discovered SPA navigations (links, router pushes, tab-state setters). Empty for stacks without UI route discovery.',
+    {
+      filter: z.object({
+        method: z.enum(['link', 'router-link', 'router-push', 'state-setter']).optional(),
+        kind: z.enum(['url', 'state', 'hash']).optional(),
+      }).optional(),
+    },
+    async (args) => {
+      const nc = getNavigationCatalog();
+      let navs = nc.navigations;
+      if (args.filter?.method) navs = navs.filter(n => n.method === args.filter!.method);
+      if (args.filter?.kind) navs = navs.filter(n => n.kind === args.filter!.kind);
+      return toolOk({ revision: nc.revision, navigations: navs, skips: nc.skips });
+    }
+  );
+
   // surface_describe_self
   server.tool(
     'surface_describe_self',
@@ -310,6 +330,7 @@ function registerMetaTools(
         pageRevision: pc.revision,
         capabilities: {
           listPages: surface.stack === 'vite',
+          listNavigations: surface.stack === 'vite',
           crawlSeed: surface.stack === 'vite',
         },
       });

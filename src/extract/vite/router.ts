@@ -13,15 +13,21 @@ import {
 } from 'ts-morph';
 import { glob } from 'tinyglobby';
 import { existsSync, readFileSync } from 'node:fs';
-import { resolve, relative, dirname, join, posix } from 'node:path';
-import type { Page, PageSkip } from '../../types.js';
+import { resolve, relative } from 'node:path';
+import type { Page, PageSkip, Navigation } from '../../types.js';
+import {
+  loadPathsMap,
+  resolveImportSpecifier,
+  tryResolveFile,
+  buildImportMap,
+  type ImportMap,
+  type PathsMap,
+} from './util.js';
 
 // ─── types ──────────────────────────────────────────────────────────────────
 
 type LazyEntry = { importPath: string; namedExport?: string };
 type LazyMap = Map<string, LazyEntry>;       // varName → { importPath, namedExport? }
-type ImportMap = Map<string, string>;         // localName → module specifier
-type PathsMap = Record<string, string[]>;     // tsconfig paths
 
 // ─── path helpers ────────────────────────────────────────────────────────────
 
@@ -52,79 +58,6 @@ function dynamicParams(route: string): string[] {
   while ((m = colonRe.exec(route)) !== null) params.push(m[1]);
   if (route.includes('*')) params.push('*');
   return params;
-}
-
-// ─── tsconfig path resolution ────────────────────────────────────────────────
-
-function loadPathsMap(root: string): PathsMap {
-  const tsconfigPath = resolve(root, 'tsconfig.json');
-  if (!existsSync(tsconfigPath)) return {};
-  try {
-    const raw = JSON.parse(readFileSync(tsconfigPath, 'utf-8')) as {
-      compilerOptions?: { paths?: Record<string, string[]> };
-    };
-    return raw.compilerOptions?.paths ?? {};
-  } catch {
-    return {};
-  }
-}
-
-function resolveImportSpecifier(
-  spec: string,
-  fromFile: string,
-  root: string,
-  pathsMap: PathsMap
-): string {
-  const exts = ['.tsx', '.ts', '.jsx', '.js'];
-
-  // Handle @/ and other tsconfig paths aliases
-  for (const [alias, targets] of Object.entries(pathsMap)) {
-    const prefix = alias.replace(/\*$/, '');
-    if (spec.startsWith(prefix)) {
-      const suffix = spec.slice(prefix.length);
-      for (const target of targets) {
-        const targetDir = target.replace(/\*$/, '');
-        const candidate = resolve(root, targetDir + suffix);
-        const found = tryResolveFile(candidate, exts);
-        if (found) return relative(root, found).replace(/\\/g, '/');
-      }
-    }
-  }
-
-  // Fallback: default @/ → <root>/src/
-  if (spec.startsWith('@/')) {
-    const suffix = spec.slice(2);
-    const candidate = resolve(root, 'src', suffix);
-    const found = tryResolveFile(candidate, exts);
-    if (found) return relative(root, found).replace(/\\/g, '/');
-  }
-
-  // Relative import
-  if (spec.startsWith('.')) {
-    const candidate = resolve(dirname(fromFile), spec);
-    const found = tryResolveFile(candidate, exts);
-    if (found) return relative(root, found).replace(/\\/g, '/');
-  }
-
-  return '<unresolved>';
-}
-
-function tryResolveFile(base: string, exts: string[]): string | undefined {
-  // Direct match with extension
-  for (const ext of exts) {
-    if (base.endsWith(ext) && existsSync(base)) return base;
-  }
-  // Add extension
-  for (const ext of exts) {
-    const candidate = base + ext;
-    if (existsSync(candidate)) return candidate;
-  }
-  // Index file
-  for (const ext of exts) {
-    const candidate = join(base, `index${ext}`);
-    if (existsSync(candidate)) return candidate;
-  }
-  return undefined;
 }
 
 // ─── JSX attribute helpers ───────────────────────────────────────────────────
@@ -280,24 +213,6 @@ function buildLazyMap(sf: SourceFile): LazyMap {
 
     const varName = vd.getName();
     map.set(varName, { importPath, namedExport });
-  }
-  return map;
-}
-
-// ─── per-file: collect static import map ─────────────────────────────────────
-
-function buildImportMap(sf: SourceFile): ImportMap {
-  const map: ImportMap = new Map();
-  for (const imp of sf.getImportDeclarations()) {
-    if (imp.isTypeOnly()) continue;
-    const modSpec = imp.getModuleSpecifierValue();
-    const defaultImport = imp.getDefaultImport();
-    if (defaultImport) map.set(defaultImport.getText(), modSpec);
-    for (const named of imp.getNamedImports()) {
-      if (named.isTypeOnly()) continue;
-      const alias = named.getAliasNode()?.getText() ?? named.getName();
-      map.set(alias, modSpec);
-    }
   }
   return map;
 }
@@ -739,6 +654,16 @@ export async function extractVitePages(root: string): Promise<{ pages: Page[]; s
     }
   }
 
+  // Merge synthetic tab-state pages from navigation extractor
+  const { extractViteNavigations } = await import('./navigations.js');
+  const { navigations: navs } = await extractViteNavigations(root, project, pathsMap, sortedFiles);
+  const syntheticPages = synthesizeTabStatePages(navs);
+  for (const sp of syntheticPages) {
+    if (!dedupedPages.some(p => p.route === sp.route)) {
+      dedupedPages.push(sp);
+    }
+  }
+
   // Sort by (route, componentName) for determinism
   dedupedPages.sort((a, b) => {
     const rc = a.route.localeCompare(b.route);
@@ -747,4 +672,26 @@ export async function extractVitePages(root: string): Promise<{ pages: Page[]; s
   });
 
   return { pages: dedupedPages, skips: allSkips };
+}
+
+/**
+ * Converts tab-state navigations into synthetic Page entries with query-string routes.
+ * Called from extractVitePages after navigation extraction completes.
+ */
+export function synthesizeTabStatePages(navigations: Navigation[]): Page[] {
+  const stateNavs = navigations.filter(n => n.kind === 'state' && n.stateVar);
+  const result: Page[] = [];
+  for (const nav of stateNavs) {
+    const route = `/?${encodeURIComponent(nav.stateVar!)}=${encodeURIComponent(nav.target)}`;
+    result.push({
+      route,
+      sourceFile: nav.sourceFile,
+      componentName: undefined,
+      lazy: false,
+      dynamicParams: [],
+      declaredAt: { file: nav.sourceFile, line: nav.sourceLine },
+      source: 'static',
+    });
+  }
+  return result;
 }
