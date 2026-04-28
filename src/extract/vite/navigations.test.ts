@@ -820,3 +820,433 @@ describe('duplicateCount', () => {
     expect(localDash?.duplicateCount).toBe(0);
   });
 });
+
+// ─── Closure-arg resolution tests ────────────────────────────────────────────
+
+describe('Pass D — closure-arg resolution: factory call (E1)', () => {
+  it('factory/inline: 4 callsites → 4 navigations', async () => {
+    const { navigations, skips } = await extractFromSource(`
+      import { useState } from 'react';
+      type Tab = 'a' | 'b' | 'c' | 'd';
+      export function App() {
+        const [tab, setTab] = useState<Tab>('a');
+        const item = (id: Tab, label: string) => (
+          <button onClick={() => setTab(id)}>{label}</button>
+        );
+        return <nav>{item('a', 'A')}{item('b', 'B')}{item('c', 'C')}{item('d', 'D')}</nav>;
+      }
+    `);
+    expect(skips.filter(s => s.reason === 'dynamic_target')).toHaveLength(0);
+    expect(navigations).toHaveLength(4);
+    const targets = navigations.map(n => n.target).sort();
+    expect(targets).toEqual(['a', 'b', 'c', 'd']);
+    expect(navigations[0]).toMatchObject({
+      method: 'state-setter',
+      kind: 'state',
+      stateVar: 'tab',
+      confidence: 'high',
+      triggerSelectorHint: expect.objectContaining({ text: expect.any(String) }),
+    });
+  });
+
+  it('factory/label-resolution: triggerSelectorHint.text differs per callsite', async () => {
+    const { navigations } = await extractFromSource(`
+      import { useState } from 'react';
+      type Tab = 'x' | 'y' | 'z';
+      export function App() {
+        const [tab, setTab] = useState<Tab>('x');
+        const item = (id: Tab, label: string) => (
+          <button onClick={() => setTab(id)}>{label}</button>
+        );
+        return <nav>{item('x', 'Alpha')}{item('y', 'Beta')}{item('z', 'Gamma')}</nav>;
+      }
+    `);
+    expect(navigations).toHaveLength(3);
+    const labels = navigations.map(n => n.triggerSelectorHint.text).sort();
+    expect(labels).toEqual(['Alpha', 'Beta', 'Gamma']);
+  });
+
+  it('factory/aria-label-resolution: aria-label attribute resolves per callsite', async () => {
+    const { navigations } = await extractFromSource(`
+      import { useState } from 'react';
+      type Tab = 'a' | 'b';
+      export function App() {
+        const [tab, setTab] = useState<Tab>('a');
+        const item = (id: Tab, ariaLabel: string) => (
+          <button aria-label={ariaLabel} onClick={() => setTab(id)} />
+        );
+        return <nav>{item('a', 'First')}{item('b', 'Second')}</nav>;
+      }
+    `);
+    expect(navigations).toHaveLength(2);
+    const ariaLabels = navigations.map(n => n.triggerSelectorHint.ariaLabel).sort();
+    expect(ariaLabels).toEqual(['First', 'Second']);
+  });
+
+  it('factory/single-callsite: 1 callsite → 1 navigation', async () => {
+    const { navigations, skips } = await extractFromSource(`
+      import { useState } from 'react';
+      export function App() {
+        const [tab, setTab] = useState<'a'>('a');
+        const item = (id: 'a', label: string) => (
+          <button onClick={() => setTab(id)}>{label}</button>
+        );
+        return <nav>{item('a', 'Only')}</nav>;
+      }
+    `);
+    expect(skips.filter(s => s.reason === 'dynamic_target')).toHaveLength(0);
+    expect(navigations).toHaveLength(1);
+    expect(navigations[0].target).toBe('a');
+    expect(navigations[0].confidence).toBe('high');
+  });
+
+  it('factory/mixed callsites: one non-literal arg → entire factory skipped', async () => {
+    const { navigations, skips } = await extractFromSource(`
+      import { useState } from 'react';
+      export function App({ getId }: { getId: () => string }) {
+        const [tab, setTab] = useState<'a'|'b'>('a');
+        const item = (id: string, label: string) => (
+          <button onClick={() => setTab(id)}>{label}</button>
+        );
+        return <>{item('a', 'A')}{item(getId(), 'B')}</>;
+      }
+    `);
+    expect(navigations).toHaveLength(0);
+    expect(skips.some(s => s.reason === 'dynamic_target')).toBe(true);
+  });
+
+  it('factory/captured-identifier: id is outer scope const → dynamic_target', async () => {
+    const { navigations, skips } = await extractFromSource(`
+      import { useState } from 'react';
+      export function App() {
+        const [tab, setTab] = useState<'a'|'b'>('a');
+        const id: 'a' = 'a';
+        return <button onClick={() => setTab(id)}>A</button>;
+      }
+    `);
+    expect(navigations).toHaveLength(0);
+    expect(skips.some(s => s.reason === 'dynamic_target')).toBe(true);
+  });
+});
+
+describe('Pass D — closure-arg resolution: array map (E2)', () => {
+  it('map/inline-array: literal array → N navigations', async () => {
+    const { navigations, skips } = await extractFromSource(`
+      import { useState } from 'react';
+      type Tab = 'a' | 'b';
+      export function App() {
+        const [tab, setTab] = useState<Tab>('a');
+        const tabs = [{ id: 'a', label: 'A' }, { id: 'b', label: 'B' }] as const;
+        return <>{tabs.map(({ id, label }) => (
+          <button key={id} onClick={() => setTab(id)}>{label}</button>
+        ))}</>;
+      }
+    `);
+    expect(skips.filter(s => s.reason === 'dynamic_target')).toHaveLength(0);
+    expect(navigations).toHaveLength(2);
+    expect(navigations.map(n => n.target).sort()).toEqual(['a', 'b']);
+  });
+
+  it('map/testId-resolution: data-testid resolves per element', async () => {
+    const { navigations } = await extractFromSource(`
+      import { useState } from 'react';
+      type Tab = 'a' | 'b';
+      export function App() {
+        const [tab, setTab] = useState<Tab>('a');
+        const tabs = [
+          { id: 'a', label: 'A', tid: 'btn-a' },
+          { id: 'b', label: 'B', tid: 'btn-b' },
+        ];
+        return <>{tabs.map(({ id, label, tid }) => (
+          <button data-testid={tid} onClick={() => setTab(id)}>{label}</button>
+        ))}</>;
+      }
+    `);
+    expect(navigations).toHaveLength(2);
+    const tids = navigations.map(n => n.triggerSelectorHint.testId).sort();
+    expect(tids).toEqual(['btn-a', 'btn-b']);
+  });
+
+  it('map/destructure-rename: ({id: tabId, label}) → setTab(tabId)', async () => {
+    const { navigations } = await extractFromSource(`
+      import { useState } from 'react';
+      type Tab = 'x' | 'y';
+      export function App() {
+        const [tab, setTab] = useState<Tab>('x');
+        const tabs = [{ id: 'x', label: 'X' }, { id: 'y', label: 'Y' }];
+        return <>{tabs.map(({ id: tabId, label }) => (
+          <button onClick={() => setTab(tabId)}>{label}</button>
+        ))}</>;
+      }
+    `);
+    expect(navigations).toHaveLength(2);
+    expect(navigations.map(n => n.target).sort()).toEqual(['x', 'y']);
+  });
+
+  it('map/iteree-non-literal: tabs from useState → runtime_iterable skip', async () => {
+    const { navigations, skips } = await extractFromSource(`
+      import { useState } from 'react';
+      export function App() {
+        const [tab, setTab] = useState<'a'|'b'>('a');
+        const [tabs] = useState([{ id: 'a' as const, label: 'A' }]);
+        return <>{tabs.map(({ id, label }) => (
+          <button onClick={() => setTab(id)}>{label}</button>
+        ))}</>;
+      }
+    `);
+    expect(navigations).toHaveLength(0);
+    expect(skips.some(s => s.reason === 'runtime_iterable')).toBe(true);
+  });
+
+  it('map/spread-element: [...other] → runtime_iterable skip', async () => {
+    const { navigations, skips } = await extractFromSource(`
+      import { useState } from 'react';
+      const other = [{ id: 'x', label: 'X' }];
+      export function App() {
+        const [tab, setTab] = useState<'x'>('x');
+        const tabs = [...other, { id: 'y', label: 'Y' }];
+        return <>{tabs.map(({ id, label }) => (
+          <button onClick={() => setTab(id)}>{label}</button>
+        ))}</>;
+      }
+    `);
+    expect(navigations).toHaveLength(0);
+    expect(skips.some(s => s.reason === 'runtime_iterable')).toBe(true);
+  });
+
+  it('map/flatMap: tabs.flatMap(...) treated like map', async () => {
+    const { navigations } = await extractFromSource(`
+      import { useState } from 'react';
+      type Tab = 'p' | 'q';
+      export function App() {
+        const [tab, setTab] = useState<Tab>('p');
+        const tabs = [{ id: 'p', label: 'P' }, { id: 'q', label: 'Q' }];
+        return <>{tabs.flatMap(({ id, label }) => [
+          <button key={id} onClick={() => setTab(id)}>{label}</button>
+        ])}</>;
+      }
+    `);
+    expect(navigations).toHaveLength(2);
+    expect(navigations.map(n => n.target).sort()).toEqual(['p', 'q']);
+  });
+
+  it('map/forEach: tabs.forEach(...) accepted', async () => {
+    const { navigations } = await extractFromSource(`
+      import { useState } from 'react';
+      type Tab = 'r' | 's';
+      export function App() {
+        const [tab, setTab] = useState<Tab>('r');
+        const tabs = [{ id: 'r', label: 'R' }, { id: 's', label: 'S' }];
+        return <>{tabs.forEach(({ id, label }) => (
+          <button onClick={() => setTab(id)}>{label}</button>
+        ))}</>;
+      }
+    `);
+    expect(navigations).toHaveLength(2);
+  });
+
+  it('map/binding-1-hop: const tabs = ARRAY then map', async () => {
+    const { navigations } = await extractFromSource(`
+      import { useState } from 'react';
+      type Tab = 'u' | 'v';
+      const TABS = [{ id: 'u', label: 'U' }, { id: 'v', label: 'V' }];
+      export function App() {
+        const [tab, setTab] = useState<Tab>('u');
+        const tabs = TABS;
+        return <>{tabs.map(({ id, label }) => (
+          <button onClick={() => setTab(id)}>{label}</button>
+        ))}</>;
+      }
+    `);
+    expect(navigations).toHaveLength(2);
+    expect(navigations.map(n => n.target).sort()).toEqual(['u', 'v']);
+  });
+
+  it('map/binding-2-hops: const tabs = other; const other = ARRAY', async () => {
+    const { navigations } = await extractFromSource(`
+      import { useState } from 'react';
+      type Tab = 'm' | 'n';
+      const BASE = [{ id: 'm', label: 'M' }, { id: 'n', label: 'N' }];
+      const ALIAS = BASE;
+      export function App() {
+        const [tab, setTab] = useState<Tab>('m');
+        return <>{ALIAS.map(({ id, label }) => (
+          <button onClick={() => setTab(id)}>{label}</button>
+        ))}</>;
+      }
+    `);
+    expect(navigations).toHaveLength(2);
+  });
+
+  it('map/binding-3-hops: depth exceeded → runtime_iterable skip', async () => {
+    // 3 Identifier hops: A→B→C→D→array. Only 2 hops allowed (depth=2).
+    const { navigations, skips } = await extractFromSource(`
+      import { useState } from 'react';
+      type Tab = 'e' | 'f';
+      const D = [{ id: 'e', label: 'E' }, { id: 'f', label: 'F' }];
+      const C = D;
+      const B = C;
+      const A = B;
+      export function App() {
+        const [tab, setTab] = useState<Tab>('e');
+        return <>{A.map(({ id, label }) => (
+          <button onClick={() => setTab(id)}>{label}</button>
+        ))}</>;
+      }
+    `);
+    expect(navigations).toHaveLength(0);
+    expect(skips.some(s => s.reason === 'runtime_iterable')).toBe(true);
+  });
+
+  it('map/empty-array: [] → 0 navigations, no skip', async () => {
+    const { navigations, skips } = await extractFromSource(`
+      import { useState } from 'react';
+      export function App() {
+        const [tab, setTab] = useState<'a'>('a');
+        const tabs: Array<{ id: 'a'; label: string }> = [];
+        return <>{tabs.map(({ id, label }) => (
+          <button onClick={() => setTab(id)}>{label}</button>
+        ))}</>;
+      }
+    `);
+    expect(navigations).toHaveLength(0);
+    expect(skips.filter(s => s.reason !== 'no_trigger_label')).toHaveLength(0);
+  });
+});
+
+describe('Pass D — closure-arg resolution: bounded', () => {
+  it('iterable_overflow: array of 33 elements → iterable_overflow skip', async () => {
+    const elements = Array.from({ length: 33 }, (_, i) => `{ id: 't${i}', label: 'T${i}' }`).join(', ');
+    const { navigations, skips } = await extractFromSource(`
+      import { useState } from 'react';
+      export function App() {
+        const [tab, setTab] = useState('t0');
+        const tabs = [${elements}];
+        return <>{tabs.map(({ id, label }) => (
+          <button onClick={() => setTab(id)}>{label}</button>
+        ))}</>;
+      }
+    `);
+    expect(navigations).toHaveLength(0);
+    expect(skips.some(s => s.reason === 'iterable_overflow')).toBe(true);
+  });
+
+  it('runtime_index: setTab(tabs[i].id) → runtime_index skip', async () => {
+    const { navigations, skips } = await extractFromSource(`
+      import { useState } from 'react';
+      export function App() {
+        const [tab, setTab] = useState('a');
+        const tabs = ['a', 'b'];
+        return <button onClick={() => setTab(tabs[0])}>Tab</button>;
+      }
+    `);
+    expect(navigations).toHaveLength(0);
+    expect(skips.some(s => s.reason === 'runtime_index')).toBe(true);
+  });
+
+  it('template-literal: setTab(`tab-${id}`) → dynamic_target skip', async () => {
+    const { navigations, skips } = await extractFromSource(`
+      import { useState } from 'react';
+      export function App() {
+        const [tab, setTab] = useState('tab-a');
+        const id = 'a';
+        return <button onClick={() => setTab(\`tab-\${id}\`)}>A</button>;
+      }
+    `);
+    expect(navigations).toHaveLength(0);
+    expect(skips.some(s => s.reason === 'dynamic_target')).toBe(true);
+  });
+
+  it('ternary: setTab(cond ? "a" : "b") → dynamic_target skip', async () => {
+    const { navigations, skips } = await extractFromSource(`
+      import { useState } from 'react';
+      export function App({ cond }: { cond: boolean }) {
+        const [tab, setTab] = useState<'a'|'b'>('a');
+        return <button onClick={() => setTab(cond ? 'a' : 'b')}>X</button>;
+      }
+    `);
+    expect(navigations).toHaveLength(0);
+    expect(skips.some(s => s.reason === 'dynamic_target')).toBe(true);
+  });
+});
+
+describe('Pass D — prop-setter recognition', () => {
+  it('prop-setter/factory: props.setTab + factory pattern → navigations emitted', async () => {
+    const { navigations, skips } = await extractFromSource(`
+      type Props = { setTab: (t: string) => void };
+      export function Navbar({ setTab }: Props) {
+        const item = (id: string, label: string) => (
+          <button onClick={() => setTab(id)}>{label}</button>
+        );
+        return <>{item('dashboard', 'Dashboard')}{item('trades', 'Trades')}</>;
+      }
+    `);
+    expect(navigations).toHaveLength(2);
+    expect(navigations[0]).toMatchObject({
+      method: 'state-setter',
+      target: 'dashboard',
+      stateVar: 'setTab',
+      confidence: 'high',
+      triggerSelectorHint: expect.objectContaining({ text: 'Dashboard' }),
+    });
+    expect(skips.filter(s => s.reason === 'dynamic_target')).toHaveLength(0);
+  });
+
+  it('prop-setter/literal: props.setTab + literal-arg onClick → 1 navigation', async () => {
+    const { navigations } = await extractFromSource(`
+      type Props = { setTab: (t: string) => void };
+      export function Nav({ setTab }: Props) {
+        return <button onClick={() => setTab('home')}>Home</button>;
+      }
+    `);
+    expect(navigations).toHaveLength(1);
+    expect(navigations[0].target).toBe('home');
+    expect(navigations[0].method).toBe('state-setter');
+  });
+
+  it('prop-setter/non-string-type: props.setVisible (boolean) → not detected as nav setter', async () => {
+    const { navigations } = await extractFromSource(`
+      type Props = { setVisible: (b: boolean) => void };
+      export function Panel({ setVisible }: Props) {
+        return <button onClick={() => setVisible(true)}>Toggle</button>;
+      }
+    `);
+    expect(navigations).toHaveLength(0);
+  });
+});
+
+describe('Pass C — closure-arg resolution', () => {
+  it('useNavigate/factory: navigate(path) inside factory → navigations emitted', async () => {
+    const { navigations } = await extractFromSource(`
+      import { useNavigate } from 'react-router-dom';
+      export function Nav() {
+        const nav = useNavigate();
+        const item = (path: string, label: string) => (
+          <button onClick={() => nav(path)}>{label}</button>
+        );
+        return <>{item('/a', 'A')}{item('/b', 'B')}</>;
+      }
+    `);
+    expect(navigations).toHaveLength(2);
+    expect(navigations.map(n => n.target).sort()).toEqual(['/a', '/b']);
+    expect(navigations[0].method).toBe('router-push');
+    expect(navigations[0].kind).toBe('url');
+    expect(navigations[0].confidence).toBe('medium');
+  });
+
+  it('useNavigate/array-map: nav(t.path) inside .map → navigations emitted', async () => {
+    const { navigations } = await extractFromSource(`
+      import { useNavigate } from 'react-router-dom';
+      const routes = [{ path: '/x', label: 'X' }, { path: '/y', label: 'Y' }];
+      export function Nav() {
+        const nav = useNavigate();
+        return <>{routes.map(({ path, label }) => (
+          <button onClick={() => nav(path)}>{label}</button>
+        ))}</>;
+      }
+    `);
+    expect(navigations).toHaveLength(2);
+    expect(navigations.map(n => n.target).sort()).toEqual(['/x', '/y']);
+    expect(navigations[0].method).toBe('router-push');
+  });
+});

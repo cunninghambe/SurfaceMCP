@@ -302,6 +302,9 @@ export type NavigationSkip = {
     | 'dynamic_target'
     | 'unresolved_setter'
     | 'union_overflow'
+    | 'iterable_overflow'
+    | 'runtime_iterable'
+    | 'runtime_index'
     | 'no_trigger_label';
   detail?: string;
   declaredAt?: { file: string; line: number };

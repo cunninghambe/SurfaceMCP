@@ -1,0 +1,21 @@
+{
+  "surfaces": [
+    {
+      "name": "tab-state-app-array-map",
+      "stack": "vite",
+      "root": ".",
+      "baseUrl": "http://localhost:5176",
+      "port": 3113,
+      "launchDevCommand": "npm run dev",
+      "watchPaths": ["src"],
+      "watchIgnore": [],
+      "auth": { "kind": "none" },
+      "roles": [
+        { "name": "anonymous", "credentials": {} }
+      ],
+      "excludedRoutes": [],
+      "externalIntegrations": [],
+      "_suggestedExternalIntegrations": []
+    }
+  ]
+}

@@ -12,38 +12,23 @@ import { existsSync } from 'node:fs';
 import { resolve, relative } from 'node:path';
 import type { Navigation, NavigationSkip } from '../../types.js';
 import { loadPathsMap, buildImportMap, type ImportMap, type PathsMap } from './util.js';
+import { resolveClosureArg, findPropSetters } from './navigations-closure.js';
 
 // ─── label extraction ─────────────────────────────────────────────────────────
 
 /** Walk JSX element children and collect text content (strips whitespace, max 80 chars). */
 function extractJsxLabel(node: Node): string {
   const parts: string[] = [];
-  collectTextContent(node, parts);
+  const collect = (n: Node): void => {
+    const k = n.getKind();
+    if (k === SyntaxKind.JsxText) { parts.push(n.getText()); return; }
+    if (k === SyntaxKind.JsxElement || k === SyntaxKind.JsxFragment || k === SyntaxKind.SyntaxList) {
+      for (const child of n.getChildren()) collect(child);
+    }
+    // JsxExpression: not traversable statically; skip
+  };
+  collect(node);
   return parts.join('').replace(/\s+/g, ' ').trim().slice(0, 80);
-}
-
-function collectTextContent(node: Node, parts: string[]): void {
-  const kind = node.getKind();
-  if (kind === SyntaxKind.JsxText) {
-    parts.push(node.getText());
-    return;
-  }
-  if (kind === SyntaxKind.JsxElement || kind === SyntaxKind.JsxFragment) {
-    for (const child of node.getChildren()) {
-      collectTextContent(child, parts);
-    }
-    return;
-  }
-  if (kind === SyntaxKind.SyntaxList) {
-    for (const child of node.getChildren()) {
-      collectTextContent(child, parts);
-    }
-    return;
-  }
-  if (kind === SyntaxKind.JsxExpression) {
-    // Not traversable statically in a meaningful way; skip
-    return;
-  }
 }
 
 /** Get a string literal attribute from a JSX element's attribute list. */
@@ -68,28 +53,31 @@ function getStringAttr(attrs: Node[], name: string): string | undefined {
   return undefined;
 }
 
+const TRIGGER_TAGS = new Set(['button', 'a', 'div', 'span', 'li', 'MenuItem', 'Item']);
+
+/** Returns {tag, attrs} for a JSX element or self-closing element, or null for other nodes. */
+function jsxInfo(node: Node): { tag: string; attrs: Node[] } | null {
+  const k = node.getKind();
+  if (k === SyntaxKind.JsxElement) {
+    const el = node.asKindOrThrow(SyntaxKind.JsxElement);
+    return { tag: el.getOpeningElement().getTagNameNode().getText(), attrs: el.getOpeningElement().getAttributes() };
+  }
+  if (k === SyntaxKind.JsxSelfClosingElement) {
+    const el = node.asKindOrThrow(SyntaxKind.JsxSelfClosingElement);
+    return { tag: el.getTagNameNode().getText(), attrs: el.getAttributes() };
+  }
+  return null;
+}
+
 /** Walk up at most 8 parent nodes to find a JSX trigger element (button, a, div, span, or role=button/link). */
 function findEnclosingTrigger(node: Node): Node | null {
-  const TRIGGER_TAGS = new Set(['button', 'a', 'div', 'span', 'li', 'MenuItem', 'Item']);
   let current = node.getParent();
-  let hops = 0;
-  while (current && hops < 8) {
-    const kind = current.getKind();
-    if (kind === SyntaxKind.JsxElement || kind === SyntaxKind.JsxSelfClosingElement) {
-      const tagName = kind === SyntaxKind.JsxElement
-        ? current.asKindOrThrow(SyntaxKind.JsxElement).getOpeningElement().getTagNameNode().getText()
-        : current.asKindOrThrow(SyntaxKind.JsxSelfClosingElement).getTagNameNode().getText();
-      const attrs: Node[] = kind === SyntaxKind.JsxElement
-        ? current.asKindOrThrow(SyntaxKind.JsxElement).getOpeningElement().getAttributes()
-        : current.asKindOrThrow(SyntaxKind.JsxSelfClosingElement).getAttributes();
-
-      if (TRIGGER_TAGS.has(tagName)) return current;
-      // Check for role="button" or role="link"
-      const role = getStringAttr(attrs, 'role');
-      if (role === 'button' || role === 'link') return current;
-    }
-    current = current.getParent();
-    hops++;
+  for (let hops = 0; current && hops < 8; hops++, current = current.getParent()) {
+    const info = jsxInfo(current);
+    if (!info) continue;
+    if (TRIGGER_TAGS.has(info.tag)) return current;
+    const role = getStringAttr(info.attrs, 'role');
+    if (role === 'button' || role === 'link') return current;
   }
   return null;
 }
@@ -109,26 +97,13 @@ function preferredSelector(hint: {
 }
 
 /** Extract label and hint from a trigger JSX element. */
-function extractTriggerInfo(trigger: Node): {
-  label: string;
-  /** Raw JSX text content (not title fallback). Used as triggerSelectorHint.text. */
-  textContent: string;
-  testId?: string;
-  ariaLabel?: string;
-  title?: string;
-} {
-  const kind = trigger.getKind();
-  const attrs: Node[] = kind === SyntaxKind.JsxElement
-    ? trigger.asKindOrThrow(SyntaxKind.JsxElement).getOpeningElement().getAttributes()
-    : trigger.asKindOrThrow(SyntaxKind.JsxSelfClosingElement).getAttributes();
-
+function extractTriggerInfo(trigger: Node): { label: string; textContent: string; testId?: string; ariaLabel?: string; title?: string } {
+  const { attrs } = jsxInfo(trigger) ?? { attrs: [] as Node[] };
   const testId = getStringAttr(attrs, 'data-testid');
   const ariaLabel = getStringAttr(attrs, 'aria-label');
   const titleAttr = getStringAttr(attrs, 'title');
   const textContent = extractJsxLabel(trigger).trim();
-  const label = textContent || titleAttr || '';
-
-  return { label, textContent, testId, ariaLabel, title: titleAttr };
+  return { label: textContent || titleAttr || '', textContent, testId, ariaLabel, title: titleAttr };
 }
 
 // ─── Pass A: <Link to="..."> and <NavLink to="..."> ─────────────────────────
@@ -141,76 +116,33 @@ function passA(
   navigations: Navigation[],
   skips: NavigationSkip[]
 ): void {
-  const linkLocalNames: string[] = [];
-  for (const [local, src] of importMap) {
-    if ((local === 'Link' || local === 'NavLink') && src === 'react-router-dom') {
-      linkLocalNames.push(local);
-    }
-  }
+  const linkLocalNames = [...importMap.entries()]
+    .filter(([local, src]) => (local === 'Link' || local === 'NavLink') && src === 'react-router-dom')
+    .map(([local]) => local);
   if (linkLocalNames.length === 0) return;
 
   const sourceFileRelative = relative(root, filePath).replace(/\\/g, '/');
-
-  function processLinkElement(node: Node, tagName: string): void {
-    const isJsxEl = node.getKind() === SyntaxKind.JsxElement;
-    const attrs: Node[] = isJsxEl
-      ? node.asKindOrThrow(SyntaxKind.JsxElement).getOpeningElement().getAttributes()
-      : node.asKindOrThrow(SyntaxKind.JsxSelfClosingElement).getAttributes();
-
-    const to = getStringAttr(attrs, 'to');
-    const line = node.getStartLineNumber();
-
-    if (to === undefined) {
-      // Non-literal "to" attribute
-      const toAttr = attrs.find(a => {
-        if (a.getKind() !== SyntaxKind.JsxAttribute) return false;
-        return a.asKindOrThrow(SyntaxKind.JsxAttribute).getNameNode().getText() === 'to';
-      });
-      if (toAttr) {
-        skips.push({
-          reason: 'dynamic_target',
-          detail: `${tagName} with non-literal 'to' at ${sourceFileRelative}:${line}`,
-          declaredAt: { file: sourceFileRelative, line },
-        });
-      }
-      return;
-    }
-
-    const testId = getStringAttr(attrs, 'data-testid');
-    const ariaLabel = getStringAttr(attrs, 'aria-label');
-    const titleAttr = getStringAttr(attrs, 'title');
-    const labelText = isJsxEl
-      ? extractJsxLabel(node).trim()
-      : to.split('/').filter(Boolean).pop() ?? to;
-
-    const hint = { text: labelText || undefined, testId, ariaLabel, title: titleAttr };
-    const nav: Navigation = {
-      label: labelText,
-      method: 'router-link',
-      target: to,
-      kind: 'url',
-      triggerSelectorHint: { ...hint, preferred: preferredSelector(hint) },
-      sourceFile: sourceFileRelative,
-      sourceLine: line,
-      confidence: 'high',
-    };
-    navigations.push(nav);
-  }
-
-  // Walk all JSX elements
   const allElements = [
     ...sf.getDescendantsOfKind(SyntaxKind.JsxElement),
     ...sf.getDescendantsOfKind(SyntaxKind.JsxSelfClosingElement),
   ];
 
   for (const el of allElements) {
-    const tagName = el.getKind() === SyntaxKind.JsxElement
-      ? el.asKindOrThrow(SyntaxKind.JsxElement).getOpeningElement().getTagNameNode().getText()
-      : el.asKindOrThrow(SyntaxKind.JsxSelfClosingElement).getTagNameNode().getText();
-
-    if (linkLocalNames.includes(tagName)) {
-      processLinkElement(el, tagName);
+    const info = jsxInfo(el);
+    if (!info || !linkLocalNames.includes(info.tag)) continue;
+    const to = getStringAttr(info.attrs, 'to');
+    const line = el.getStartLineNumber();
+    if (to === undefined) {
+      const hasDynamicTo = info.attrs.some(a => a.getKind() === SyntaxKind.JsxAttribute && a.asKindOrThrow(SyntaxKind.JsxAttribute).getNameNode().getText() === 'to');
+      if (hasDynamicTo) skips.push({ reason: 'dynamic_target', detail: `${info.tag} with non-literal 'to' at ${sourceFileRelative}:${line}`, declaredAt: { file: sourceFileRelative, line } });
+      continue;
     }
+    const testId = getStringAttr(info.attrs, 'data-testid');
+    const ariaLabel = getStringAttr(info.attrs, 'aria-label');
+    const titleAttr = getStringAttr(info.attrs, 'title');
+    const labelText = el.getKind() === SyntaxKind.JsxElement ? extractJsxLabel(el).trim() : to.split('/').filter(Boolean).pop() ?? to;
+    const hint = { text: labelText || undefined, testId, ariaLabel, title: titleAttr };
+    navigations.push({ label: labelText, method: 'router-link', target: to, kind: 'url', triggerSelectorHint: { ...hint, preferred: preferredSelector(hint) }, sourceFile: sourceFileRelative, sourceLine: line, confidence: 'high' });
   }
 }
 
@@ -218,71 +150,28 @@ function passA(
 
 const SKIP_HREF_PREFIXES = ['mailto:', 'tel:', 'javascript:', 'http://', 'https://'];
 
-function passB(
-  sf: SourceFile,
-  filePath: string,
-  root: string,
-  navigations: Navigation[],
-  skips: NavigationSkip[]
-): void {
+function passB(sf: SourceFile, filePath: string, root: string, navigations: Navigation[], skips: NavigationSkip[]): void {
   const sourceFileRelative = relative(root, filePath).replace(/\\/g, '/');
+  const allElements = [...sf.getDescendantsOfKind(SyntaxKind.JsxElement), ...sf.getDescendantsOfKind(SyntaxKind.JsxSelfClosingElement)];
 
-  const allAnchorElements = [
-    ...sf.getDescendantsOfKind(SyntaxKind.JsxElement),
-    ...sf.getDescendantsOfKind(SyntaxKind.JsxSelfClosingElement),
-  ].filter(el => {
-    const tagName = el.getKind() === SyntaxKind.JsxElement
-      ? el.asKindOrThrow(SyntaxKind.JsxElement).getOpeningElement().getTagNameNode().getText()
-      : el.asKindOrThrow(SyntaxKind.JsxSelfClosingElement).getTagNameNode().getText();
-    return tagName === 'a';
-  });
-
-  for (const el of allAnchorElements) {
-    const isJsxEl = el.getKind() === SyntaxKind.JsxElement;
-    const attrs: Node[] = isJsxEl
-      ? el.asKindOrThrow(SyntaxKind.JsxElement).getOpeningElement().getAttributes()
-      : el.asKindOrThrow(SyntaxKind.JsxSelfClosingElement).getAttributes();
-
-    const href = getStringAttr(attrs, 'href');
-    if (href === undefined) continue; // no href attribute or non-literal
-
+  for (const el of allElements) {
+    const info = jsxInfo(el);
+    if (!info || info.tag !== 'a') continue;
+    const href = getStringAttr(info.attrs, 'href');
+    if (href === undefined) continue;
     const line = el.getStartLineNumber();
-
-    // Skip off-origin or non-http hrefs
-    if (SKIP_HREF_PREFIXES.some(prefix => href.startsWith(prefix))) continue;
-
-    // Determine kind
-    let kind: 'url' | 'hash';
-    if (href.startsWith('#')) {
-      kind = 'hash';
-    } else if (href.startsWith('/')) {
-      kind = 'url';
-    } else {
-      // Relative path without leading /: emit dynamic_target skip
-      skips.push({
-        reason: 'dynamic_target',
-        detail: `<a href="${href}"> is a relative path without leading / at ${sourceFileRelative}:${line}`,
-        declaredAt: { file: sourceFileRelative, line },
-      });
+    if (SKIP_HREF_PREFIXES.some(p => href.startsWith(p))) continue;
+    if (!href.startsWith('#') && !href.startsWith('/')) {
+      skips.push({ reason: 'dynamic_target', detail: `<a href="${href}"> is a relative path without leading / at ${sourceFileRelative}:${line}`, declaredAt: { file: sourceFileRelative, line } });
       continue;
     }
-
-    const testId = getStringAttr(attrs, 'data-testid');
-    const ariaLabel = getStringAttr(attrs, 'aria-label');
-    const titleAttr = getStringAttr(attrs, 'title');
-    const labelText = isJsxEl ? extractJsxLabel(el).trim() : '';
-
+    const kind: 'url' | 'hash' = href.startsWith('#') ? 'hash' : 'url';
+    const testId = getStringAttr(info.attrs, 'data-testid');
+    const ariaLabel = getStringAttr(info.attrs, 'aria-label');
+    const titleAttr = getStringAttr(info.attrs, 'title');
+    const labelText = el.getKind() === SyntaxKind.JsxElement ? extractJsxLabel(el).trim() : '';
     const hint = { text: labelText || undefined, testId, ariaLabel, title: titleAttr };
-    navigations.push({
-      label: labelText,
-      method: 'link',
-      target: href,
-      kind,
-      triggerSelectorHint: { ...hint, preferred: preferredSelector(hint) },
-      sourceFile: sourceFileRelative,
-      sourceLine: line,
-      confidence: 'high',
-    });
+    navigations.push({ label: labelText, method: 'link', target: href, kind, triggerSelectorHint: { ...hint, preferred: preferredSelector(hint) }, sourceFile: sourceFileRelative, sourceLine: line, confidence: 'high' });
   }
 }
 
@@ -333,13 +222,40 @@ function passC(
     const arg0 = args[0];
     const line = call.getStartLineNumber();
 
-    // Must be a string literal
     if (arg0.getKind() !== SyntaxKind.StringLiteral) {
-      skips.push({
-        reason: 'dynamic_target',
-        detail: `${exprText}(${arg0.getText()}) non-literal at ${sourceFileRelative}:${line}`,
-        declaredAt: { file: sourceFileRelative, line },
-      });
+      // Second-chance: attempt closure-arg resolution
+      const resolved = resolveClosureArg(arg0, sf);
+      if (resolved.kind === 'skip') {
+        skips.push({ reason: resolved.reason, detail: resolved.detail, declaredAt: { file: sourceFileRelative, line } });
+        continue;
+      }
+      if (resolved.bindings.length === 0) continue;
+
+      const trigger = findEnclosingTrigger(call);
+      if (!trigger) {
+        skips.push({
+          reason: 'no_trigger_label',
+          detail: `${exprText}(…) closure-resolved but no enclosing trigger at ${sourceFileRelative}:${line}`,
+          declaredAt: { file: sourceFileRelative, line },
+        });
+        continue;
+      }
+
+      for (const binding of resolved.bindings) {
+        const labelResolved = (binding.label ?? '').trim() !== '';
+        const confidence = labelResolved ? 'medium' : 'low';
+        const hint = { text: binding.label || undefined, testId: binding.testId, ariaLabel: binding.ariaLabel, title: binding.title };
+        navigations.push({
+          label: binding.label ?? '',
+          method: 'router-push',
+          target: binding.target,
+          kind: 'url',
+          triggerSelectorHint: { ...hint, preferred: preferredSelector(hint) },
+          sourceFile: sourceFileRelative,
+          sourceLine: line,
+          confidence,
+        });
+      }
       continue;
     }
 
@@ -381,7 +297,70 @@ type StateVarInfo = {
   setterName: string;
   unionMembers: Set<string>;
   inferredUnion: boolean; // true = inferred from callsites, not declared type
+  isPropSetter: boolean;  // true = setter is a prop, no local union available
 };
+
+
+/** Extract union members from a useState type argument node. */
+function extractUnionFromTypeArg(typeArg: Node): Set<string> {
+  const members = new Set<string>();
+  if (typeArg.getKind() === SyntaxKind.UnionType) {
+    for (const m of typeArg.asKindOrThrow(SyntaxKind.UnionType).getTypeNodes()) {
+      if (m.getKind() !== SyntaxKind.LiteralType) continue;
+      const lit = m.asKindOrThrow(SyntaxKind.LiteralType).getLiteral();
+      if (lit.getKind() === SyntaxKind.StringLiteral) members.add(lit.asKindOrThrow(SyntaxKind.StringLiteral).getLiteralText());
+    }
+  } else if (typeArg.getKind() === SyntaxKind.LiteralType) {
+    const lit = typeArg.asKindOrThrow(SyntaxKind.LiteralType).getLiteral();
+    if (lit.getKind() === SyntaxKind.StringLiteral) members.add(lit.asKindOrThrow(SyntaxKind.StringLiteral).getLiteralText());
+  } else {
+    for (const ut of typeArg.getType().getUnionTypes()) {
+      const val = ut.getLiteralValue();
+      if (typeof val === 'string') members.add(val);
+    }
+  }
+  return members;
+}
+
+/** Discover state-setter vars via useState declarations and prop-setter heuristic. */
+function discoverStateVars(sf: SourceFile, useStateLocalName: string | null, sourceFileRelative: string, skips: NavigationSkip[]): StateVarInfo[] {
+  const stateVars: StateVarInfo[] = [];
+  if (useStateLocalName) {
+    for (const vd of sf.getDescendantsOfKind(SyntaxKind.VariableDeclaration)) {
+      const init = vd.getInitializer();
+      if (!init || init.getKind() !== SyntaxKind.CallExpression) continue;
+      const call = init.asKindOrThrow(SyntaxKind.CallExpression);
+      if (call.getExpression().getText() !== useStateLocalName) continue;
+      const nameNode = vd.getNameNode();
+      if (nameNode.getKind() !== SyntaxKind.ArrayBindingPattern) continue;
+      const elements = nameNode.asKindOrThrow(SyntaxKind.ArrayBindingPattern).getElements();
+      if (elements.length !== 2) continue;
+      const varName = elements[0].getKind() === SyntaxKind.BindingElement ? elements[0].asKindOrThrow(SyntaxKind.BindingElement).getNameNode().getText() : null;
+      const setterName = elements[1].getKind() === SyntaxKind.BindingElement ? elements[1].asKindOrThrow(SyntaxKind.BindingElement).getNameNode().getText() : null;
+      if (!varName || !setterName || !/^set.+/i.test(setterName)) continue;
+      const typeArgs = call.getTypeArguments();
+      let unionMembers = typeArgs.length > 0 ? extractUnionFromTypeArg(typeArgs[0]) : new Set<string>();
+      let inferredUnion = false;
+      if (unionMembers.size === 0) {
+        const ca = call.getArguments();
+        if (ca.length > 0 && ca[0].getKind() === SyntaxKind.StringLiteral) { unionMembers.add(ca[0].asKindOrThrow(SyntaxKind.StringLiteral).getLiteralText()); inferredUnion = true; }
+        else continue;
+      }
+      if (unionMembers.size > MAX_UNION_MEMBERS) {
+        skips.push({ reason: 'union_overflow', detail: `${setterName} has ${unionMembers.size} union members (max ${MAX_UNION_MEMBERS})`, declaredAt: { file: sourceFileRelative, line: vd.getStartLineNumber() } });
+        continue;
+      }
+      stateVars.push({ varName, setterName, unionMembers, inferredUnion, isPropSetter: false });
+    }
+  }
+  const localNames = new Set(stateVars.map(sv => sv.setterName));
+  for (const ps of findPropSetters(sf)) {
+    if (!localNames.has(ps.setterName)) {
+      stateVars.push({ varName: ps.setterName, setterName: ps.setterName, unionMembers: new Set(), inferredUnion: false, isPropSetter: true });
+    }
+  }
+  return stateVars;
+}
 
 function passD(
   sf: SourceFile,
@@ -393,103 +372,12 @@ function passD(
 ): void {
   const sourceFileRelative = relative(root, filePath).replace(/\\/g, '/');
 
-  // Verify useState is imported from react
   let useStateLocalName: string | null = null;
   for (const [local, src] of importMap) {
-    if (src === 'react' && local === 'useState') {
-      useStateLocalName = local;
-      break;
-    }
-  }
-  if (!useStateLocalName) return;
-
-  // D.1: Find useState<'a'|'b'>('a') declarations
-  const stateVars: StateVarInfo[] = [];
-  const varDecls = sf.getDescendantsOfKind(SyntaxKind.VariableDeclaration);
-
-  for (const vd of varDecls) {
-    const init = vd.getInitializer();
-    if (!init || init.getKind() !== SyntaxKind.CallExpression) continue;
-    const call = init.asKindOrThrow(SyntaxKind.CallExpression);
-    if (call.getExpression().getText() !== useStateLocalName) continue;
-
-    // LHS must be [varName, setterName]
-    const nameNode = vd.getNameNode();
-    if (nameNode.getKind() !== SyntaxKind.ArrayBindingPattern) continue;
-    const elements = nameNode.asKindOrThrow(SyntaxKind.ArrayBindingPattern).getElements();
-    if (elements.length !== 2) continue;
-
-    const varName = elements[0].getKind() === SyntaxKind.BindingElement
-      ? elements[0].asKindOrThrow(SyntaxKind.BindingElement).getNameNode().getText()
-      : null;
-    const setterName = elements[1].getKind() === SyntaxKind.BindingElement
-      ? elements[1].asKindOrThrow(SyntaxKind.BindingElement).getNameNode().getText()
-      : null;
-
-    if (!varName || !setterName) continue;
-
-    // Setter must start with "set" (case-insensitive) and have ≥ 1 char after
-    if (!/^set.+/i.test(setterName)) continue;
-
-    // Try to get union members from type argument
-    const typeArgs = call.getTypeArguments();
-    const unionMembers = new Set<string>();
-    let inferredUnion = false;
-
-    if (typeArgs.length > 0) {
-      // Explicit type argument: useState<'a' | 'b' | 'c'> or useState<Tab> (type alias)
-      const typeArg = typeArgs[0];
-      if (typeArg.getKind() === SyntaxKind.UnionType) {
-        // Direct union literal: useState<'a' | 'b'>
-        const unionType = typeArg.asKindOrThrow(SyntaxKind.UnionType);
-        for (const member of unionType.getTypeNodes()) {
-          if (member.getKind() === SyntaxKind.LiteralType) {
-            const litType = member.asKindOrThrow(SyntaxKind.LiteralType);
-            const lit = litType.getLiteral();
-            if (lit.getKind() === SyntaxKind.StringLiteral) {
-              unionMembers.add(lit.asKindOrThrow(SyntaxKind.StringLiteral).getLiteralText());
-            }
-          }
-        }
-      } else {
-        // TypeReference (type alias like Tab) — resolve via type checker
-        const resolvedType = typeArg.getType();
-        const unionTypes = resolvedType.getUnionTypes();
-        for (const ut of unionTypes) {
-          const val = ut.getLiteralValue();
-          if (typeof val === 'string') {
-            unionMembers.add(val);
-          }
-        }
-      }
-    }
-
-    if (unionMembers.size === 0) {
-      // Fall back: try to infer from initial value (string literal arg to useState)
-      const callArgs = call.getArguments();
-      if (callArgs.length > 0 && callArgs[0].getKind() === SyntaxKind.StringLiteral) {
-        unionMembers.add(callArgs[0].asKindOrThrow(SyntaxKind.StringLiteral).getLiteralText());
-        inferredUnion = true;
-      } else {
-        // Not a tab-state useState
-        continue;
-      }
-    }
-
-    // Check overflow before deciding on inferred-union fallback
-    // (inferred-union starts with 1 member from initial value; overflow check here catches explicit types)
-    if (unionMembers.size > MAX_UNION_MEMBERS) {
-      skips.push({
-        reason: 'union_overflow',
-        detail: `${setterName} has ${unionMembers.size} union members (max ${MAX_UNION_MEMBERS})`,
-        declaredAt: { file: sourceFileRelative, line: vd.getStartLineNumber() },
-      });
-      continue;
-    }
-
-    stateVars.push({ varName, setterName, unionMembers, inferredUnion });
+    if (src === 'react' && local === 'useState') { useStateLocalName = local; break; }
   }
 
+  const stateVars = discoverStateVars(sf, useStateLocalName, sourceFileRelative, skips);
   if (stateVars.length === 0) return;
 
   // D.2 + D.3: Find setter callsites with literal args
@@ -521,66 +409,99 @@ function passD(
       const arg0 = args[0];
       const line = call.getStartLineNumber();
 
-      // Skip arrow functions used as updater: setTab(prev => ...)
-      if (
-        arg0.getKind() === SyntaxKind.ArrowFunction ||
-        arg0.getKind() === SyntaxKind.FunctionExpression
-      ) {
-        skips.push({
-          reason: 'dynamic_target',
-          detail: `${sv.setterName}(${arg0.getText().slice(0, 30)}) updater function at ${sourceFileRelative}:${line}`,
-          declaredAt: { file: sourceFileRelative, line },
+      if (arg0.getKind() === SyntaxKind.ElementAccessExpression) {
+        skips.push({ reason: 'runtime_index', detail: `${sv.setterName}(${arg0.getText().slice(0, 30)}) element-access at ${sourceFileRelative}:${line}`, declaredAt: { file: sourceFileRelative, line } });
+        continue;
+      }
+      if (arg0.getKind() === SyntaxKind.ArrowFunction || arg0.getKind() === SyntaxKind.FunctionExpression) {
+        skips.push({ reason: 'dynamic_target', detail: `${sv.setterName}(${arg0.getText().slice(0, 30)}) updater function at ${sourceFileRelative}:${line}`, declaredAt: { file: sourceFileRelative, line } });
+        continue;
+      }
+
+      if (arg0.getKind() === SyntaxKind.StringLiteral) {
+        const target = arg0.asKindOrThrow(SyntaxKind.StringLiteral).getLiteralText();
+        const dedupeKey = `${sourceFileRelative}:${line}:${target}`;
+        if (emitted.has(dedupeKey)) continue;
+        emitted.add(dedupeKey);
+
+        const inUnion = sv.unionMembers.has(target);
+        const confidence = sv.isPropSetter
+          ? 'medium'
+          : sv.inferredUnion
+          ? 'medium'
+          : inUnion
+          ? 'high'
+          : 'low';
+
+        // D.3: Find enclosing trigger
+        const trigger = findEnclosingTrigger(call);
+        if (!trigger) {
+          skips.push({
+            reason: 'no_trigger_label',
+            detail: `${sv.setterName}('${target}') has no enclosing JSX trigger at ${sourceFileRelative}:${line}`,
+            declaredAt: { file: sourceFileRelative, line },
+          });
+          continue;
+        }
+
+        const { label, textContent, testId, ariaLabel, title } = extractTriggerInfo(trigger);
+        const hint = { text: textContent || undefined, testId, ariaLabel, title };
+        navigations.push({
+          label,
+          method: 'state-setter',
+          target,
+          kind: 'state',
+          stateVar: sv.varName,
+          triggerSelectorHint: { ...hint, preferred: preferredSelector(hint) },
+          sourceFile: sourceFileRelative,
+          sourceLine: line,
+          confidence,
         });
         continue;
       }
 
-      if (arg0.getKind() !== SyntaxKind.StringLiteral) {
-        skips.push({
-          reason: 'dynamic_target',
-          detail: `${sv.setterName}(${arg0.getText().slice(0, 30)}) non-literal at ${sourceFileRelative}:${line}`,
-          declaredAt: { file: sourceFileRelative, line },
-        });
+      // Second-chance: attempt closure-arg resolution
+      const resolved = resolveClosureArg(arg0, sf);
+      if (resolved.kind === 'skip') {
+        skips.push({ reason: resolved.reason, detail: resolved.detail, declaredAt: { file: sourceFileRelative, line } });
         continue;
       }
+      if (resolved.bindings.length === 0) continue;
 
-      const target = arg0.asKindOrThrow(SyntaxKind.StringLiteral).getLiteralText();
-      const dedupeKey = `${sourceFileRelative}:${line}:${target}`;
-      if (emitted.has(dedupeKey)) continue;
-      emitted.add(dedupeKey);
-
-      const inUnion = sv.unionMembers.has(target);
-      const confidence = sv.inferredUnion
-        ? 'medium'
-        : inUnion
-        ? 'high'
-        : 'low';
-
-      // D.3: Find enclosing trigger
       const trigger = findEnclosingTrigger(call);
       if (!trigger) {
-        // Check if it's in a useEffect or non-JSX context
         skips.push({
           reason: 'no_trigger_label',
-          detail: `${sv.setterName}('${target}') has no enclosing JSX trigger at ${sourceFileRelative}:${line}`,
+          detail: `${sv.setterName}(…) closure-resolved but no enclosing trigger at ${sourceFileRelative}:${line}`,
           declaredAt: { file: sourceFileRelative, line },
         });
         continue;
       }
 
-      const { label, textContent, testId, ariaLabel, title } = extractTriggerInfo(trigger);
+      for (const binding of resolved.bindings) {
+        const dedupeKey = `${sourceFileRelative}:${line}:${binding.target}`;
+        if (emitted.has(dedupeKey)) continue;
+        emitted.add(dedupeKey);
 
-      const hint = { text: textContent || undefined, testId, ariaLabel, title };
-      navigations.push({
-        label,
-        method: 'state-setter',
-        target,
-        kind: 'state',
-        stateVar: sv.varName,
-        triggerSelectorHint: { ...hint, preferred: preferredSelector(hint) },
-        sourceFile: sourceFileRelative,
-        sourceLine: line,
-        confidence,
-      });
+        const inUnion = sv.unionMembers.has(binding.target);
+        const labelResolved = (binding.label ?? '').trim() !== '';
+        const confidence: 'high' | 'medium' | 'low' = sv.isPropSetter
+          ? (labelResolved ? 'high' : 'medium')
+          : (inUnion && labelResolved && !sv.inferredUnion) ? 'high' : inUnion ? 'medium' : 'low';
+
+        const hint = { text: binding.label || undefined, testId: binding.testId, ariaLabel: binding.ariaLabel, title: binding.title };
+        navigations.push({
+          label: binding.label ?? '',
+          method: 'state-setter',
+          target: binding.target,
+          kind: 'state',
+          stateVar: sv.varName,
+          triggerSelectorHint: { ...hint, preferred: preferredSelector(hint) },
+          sourceFile: sourceFileRelative,
+          sourceLine: line,
+          confidence,
+        });
+      }
     }
   }
 }

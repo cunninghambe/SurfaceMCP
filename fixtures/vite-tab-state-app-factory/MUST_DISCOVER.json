@@ -1,0 +1,8 @@
+{
+  "navigations": [
+    { "method": "state-setter", "target": "dashboard", "kind": "state", "stateVar": "setTab", "label": "Dashboard", "confidence": "high" },
+    { "method": "state-setter", "target": "trades", "kind": "state", "stateVar": "setTab", "label": "Trades", "confidence": "high" },
+    { "method": "state-setter", "target": "settings", "kind": "state", "stateVar": "setTab", "label": "Settings", "confidence": "high" },
+    { "method": "state-setter", "target": "profile", "kind": "state", "stateVar": "setTab", "label": "Profile", "confidence": "high" }
+  ]
+}

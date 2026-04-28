@@ -333,6 +333,59 @@ describe('vite-tab-state-app-ambiguous navigation extraction', () => {
   });
 });
 
+describe('vite-tab-state-app-factory navigation extraction', () => {
+  it('resolves factory-pattern Navbar: 4 navigations from Navbar.tsx', async () => {
+    const root = resolve(FIXTURES, 'vite-tab-state-app-factory');
+    const { navigations } = await extractViteNavigations(root);
+    const navbarNavs = navigations.filter(n => n.sourceFile.endsWith('Navbar.tsx'));
+    expect(navbarNavs).toHaveLength(4);
+    expect(navbarNavs.map(n => n.target).sort()).toEqual(['dashboard', 'profile', 'settings', 'trades']);
+    for (const n of navbarNavs) {
+      expect(n.method).toBe('state-setter');
+      expect(n.kind).toBe('state');
+      expect(n.stateVar).toBe('setTab');
+      expect(n.confidence).toBe('high');
+      expect(n.triggerSelectorHint.text).toBeTruthy();
+    }
+  });
+
+  it('resolves factory labels correctly per callsite', async () => {
+    const root = resolve(FIXTURES, 'vite-tab-state-app-factory');
+    const { navigations } = await extractViteNavigations(root);
+    const navbarNavs = navigations.filter(n => n.sourceFile.endsWith('Navbar.tsx'));
+    const labelMap = new Map(navbarNavs.map(n => [n.target, n.triggerSelectorHint.text]));
+    expect(labelMap.get('dashboard')).toBe('Dashboard');
+    expect(labelMap.get('trades')).toBe('Trades');
+    expect(labelMap.get('settings')).toBe('Settings');
+    expect(labelMap.get('profile')).toBe('Profile');
+  });
+});
+
+describe('vite-tab-state-app-array-map navigation extraction', () => {
+  it('resolves array-map pattern: 4 navigations', async () => {
+    const root = resolve(FIXTURES, 'vite-tab-state-app-array-map');
+    const { navigations } = await extractViteNavigations(root);
+    expect(navigations).toHaveLength(4);
+    expect(navigations.map(n => n.target).sort()).toEqual(['inventory', 'orders', 'overview', 'reports']);
+    for (const n of navigations) {
+      expect(n.method).toBe('state-setter');
+      expect(n.kind).toBe('state');
+      expect(n.stateVar).toBe('tab');
+      expect(n.confidence).toBe('high');
+      expect(n.triggerSelectorHint.text).toBeTruthy();
+    }
+  });
+
+  it('resolves testId per element from array-map fixture', async () => {
+    const root = resolve(FIXTURES, 'vite-tab-state-app-array-map');
+    const { navigations } = await extractViteNavigations(root);
+    const overview = navigations.find(n => n.target === 'overview');
+    expect(overview?.triggerSelectorHint.testId).toBe('tab-overview');
+    const orders = navigations.find(n => n.target === 'orders');
+    expect(orders?.triggerSelectorHint.testId).toBe('tab-orders');
+  });
+});
+
 describe('monorepo multi-surface detection', () => {
   it('detects nextjs in apps/web', async () => {
     const { detectStack } = await import('../detect/index.js');
