@@ -5,6 +5,8 @@ import { extractExpressRoutes } from './express/static.js';
 import { extractDjangoRoutes } from './django/ast-walk.js';
 import { extractOpenApiRoutes } from './openapi/parse.js';
 import { extractPagesForStack } from './pages/index.js';
+import { extractViteNavigations } from './vite/navigations.js';
+import { extractVitePages } from './vite/router.js';
 import { resolve } from 'node:path';
 import { readFileSync } from 'node:fs';
 
@@ -237,6 +239,36 @@ describe('nextjs-app surface_list_pages regression — backward compat', () => {
     const { pages, skips } = await extractPagesForStack('nextjs', root);
     expect(pages).toEqual([]);
     expect(skips).toEqual([]);
+  });
+});
+
+describe('vite-tab-state-app navigation extraction', () => {
+  it('discovers all must-discover navigations', async () => {
+    const root = resolve(FIXTURES, 'vite-tab-state-app');
+    const { navigations } = await extractViteNavigations(root);
+    const must = JSON.parse(readFileSync(resolve(FIXTURES, 'vite-tab-state-app', 'MUST_DISCOVER.json'), 'utf-8')) as {
+      navigations: Array<{ method: string; target: string; label: string; stateVar: string; confidence: string }>;
+      syntheticPages: Array<{ route: string }>;
+    };
+    for (const expected of must.navigations) {
+      const found = navigations.find(n => n.target === expected.target && n.method === expected.method);
+      expect(found, `Missing navigation: ${expected.method}/${expected.target}`).toBeDefined();
+      expect(found!.label).toBe(expected.label);
+      expect(found!.confidence).toBe(expected.confidence);
+    }
+  });
+
+  it('synthesizes one tab-state page per state value', async () => {
+    const root = resolve(FIXTURES, 'vite-tab-state-app');
+    const { pages } = await extractVitePages(root);
+    const must = JSON.parse(readFileSync(resolve(FIXTURES, 'vite-tab-state-app', 'MUST_DISCOVER.json'), 'utf-8')) as {
+      navigations: unknown[];
+      syntheticPages: Array<{ route: string }>;
+    };
+    const routes = new Set(pages.map(p => p.route));
+    for (const expected of must.syntheticPages) {
+      expect(routes.has(expected.route), `Missing synthetic page: ${expected.route}`).toBe(true);
+    }
   });
 });
 

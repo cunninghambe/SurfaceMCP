@@ -7,6 +7,7 @@ import { extractDjangoRoutes } from '../extract/django/ast-walk.js';
 import { extractOpenApiRoutes } from '../extract/openapi/parse.js';
 import { extractPagesForStack } from '../extract/pages/index.js';
 import { classifyByCallGraph } from '../classify/call-graph.js';
+import { regenerateNavigationCatalog } from './navigation-catalog.js';
 import { log } from '../log.js';
 
 let catalog: ToolCatalog = { revision: 0, tools: [] };
@@ -85,8 +86,11 @@ export async function regenerateCatalog(surface: SurfaceConfig, root: string): P
 
   log.info({ revision: catalog.revision, count: tools.length }, 'catalog updated');
 
-  // Regenerate page catalog for stacks that support it
-  await regeneratePageCatalog(surface, root);
+  // Regenerate page and navigation catalogs for stacks that support it
+  await Promise.all([
+    regeneratePageCatalog(surface, root),
+    regenerateNavigationCatalog(surface, root),
+  ]);
 }
 
 export async function regeneratePageCatalog(surface: SurfaceConfig, root: string): Promise<void> {

@@ -246,3 +246,53 @@ export type ProbeResult = {
   confidence: 'inferred' | 'unknown';
   rawError?: unknown;
 };
+
+// ─── Navigation types ─────────────────────────────────────────────────────────
+
+export type NavigationMethod =
+  | 'link'           // <a href="...">
+  | 'router-link'    // <Link to="..."> | <NavLink to="...">
+  | 'router-push'    // useNavigate()('...') | navigate('...') | router.push('...')
+  | 'state-setter';  // setTab('dashboard') with literal arg
+
+export type NavigationKind =
+  | 'url'    // target is a URL path; crawler navigates
+  | 'state'  // target is a state-var value; crawler clicks the trigger
+  | 'hash';  // target is a hash fragment
+
+export type NavigationConfidence = 'high' | 'medium' | 'low';
+
+export type Navigation = {
+  /** Human-readable button/link label (best-effort: textContent of trigger element). */
+  label: string;
+  method: NavigationMethod;
+  /** URL path for kind:'url'/'hash'; state-value for kind:'state'. Always a string literal. */
+  target: string;
+  kind: NavigationKind;
+  /** Identifier of the state setter (e.g. 'tab', 'view', 'activeTab'). Set iff kind === 'state'. */
+  stateVar?: string;
+  triggerSelectorHint: {
+    text?: string;
+    testId?: string;
+    ariaLabel?: string;
+  };
+  sourceFile: string;          // project-root-relative
+  sourceLine: number;
+  confidence: NavigationConfidence;
+};
+
+export type NavigationCatalog = {
+  revision: number;
+  navigations: Navigation[];
+  skips: NavigationSkip[];
+};
+
+export type NavigationSkip = {
+  reason:
+    | 'dynamic_target'
+    | 'unresolved_setter'
+    | 'union_overflow'
+    | 'no_trigger_label';
+  detail?: string;
+  declaredAt?: { file: string; line: number };
+};
