@@ -94,11 +94,26 @@ function findEnclosingTrigger(node: Node): Node | null {
   return null;
 }
 
+/** Derives the highest-priority selector field name from a hint object. */
+function preferredSelector(hint: {
+  testId?: string;
+  ariaLabel?: string;
+  text?: string;
+  title?: string;
+}): 'testId' | 'ariaLabel' | 'text' | 'title' | undefined {
+  if (hint.testId !== undefined && hint.testId !== '') return 'testId';
+  if (hint.ariaLabel !== undefined && hint.ariaLabel !== '') return 'ariaLabel';
+  if (hint.text !== undefined && hint.text !== '') return 'text';
+  if (hint.title !== undefined && hint.title !== '') return 'title';
+  return undefined;
+}
+
 /** Extract label and hint from a trigger JSX element. */
 function extractTriggerInfo(trigger: Node): {
   label: string;
   testId?: string;
   ariaLabel?: string;
+  title?: string;
 } {
   const kind = trigger.getKind();
   const attrs: Node[] = kind === SyntaxKind.JsxElement
@@ -107,13 +122,11 @@ function extractTriggerInfo(trigger: Node): {
 
   const testId = getStringAttr(attrs, 'data-testid');
   const ariaLabel = getStringAttr(attrs, 'aria-label');
-  const label = extractJsxLabel(trigger).trim() || (
-    kind === SyntaxKind.JsxSelfClosingElement
-      ? (getStringAttr(attrs, 'title') ?? '')
-      : ''
-  );
+  const titleAttr = getStringAttr(attrs, 'title');
+  const textContent = extractJsxLabel(trigger).trim();
+  const label = textContent || titleAttr || '';
 
-  return { label, testId, ariaLabel };
+  return { label, testId, ariaLabel, title: titleAttr };
 }
 
 // ─── Pass A: <Link to="..."> and <NavLink to="..."> ─────────────────────────
@@ -163,20 +176,18 @@ function passA(
 
     const testId = getStringAttr(attrs, 'data-testid');
     const ariaLabel = getStringAttr(attrs, 'aria-label');
+    const titleAttr = getStringAttr(attrs, 'title');
     const labelText = isJsxEl
       ? extractJsxLabel(node).trim()
       : to.split('/').filter(Boolean).pop() ?? to;
 
+    const hint = { text: labelText || undefined, testId, ariaLabel, title: titleAttr };
     const nav: Navigation = {
       label: labelText,
       method: 'router-link',
       target: to,
       kind: 'url',
-      triggerSelectorHint: {
-        text: labelText || undefined,
-        testId,
-        ariaLabel,
-      },
+      triggerSelectorHint: { ...hint, preferred: preferredSelector(hint) },
       sourceFile: sourceFileRelative,
       sourceLine: line,
       confidence: 'high',
@@ -256,18 +267,16 @@ function passB(
 
     const testId = getStringAttr(attrs, 'data-testid');
     const ariaLabel = getStringAttr(attrs, 'aria-label');
+    const titleAttr = getStringAttr(attrs, 'title');
     const labelText = isJsxEl ? extractJsxLabel(el).trim() : '';
 
+    const hint = { text: labelText || undefined, testId, ariaLabel, title: titleAttr };
     navigations.push({
       label: labelText,
       method: 'link',
       target: href,
       kind,
-      triggerSelectorHint: {
-        text: labelText || undefined,
-        testId,
-        ariaLabel,
-      },
+      triggerSelectorHint: { ...hint, preferred: preferredSelector(hint) },
       sourceFile: sourceFileRelative,
       sourceLine: line,
       confidence: 'high',
@@ -345,18 +354,15 @@ function passC(
       continue;
     }
 
-    const { label, testId, ariaLabel } = extractTriggerInfo(trigger);
+    const { label, testId, ariaLabel, title } = extractTriggerInfo(trigger);
 
+    const hint = { text: label || undefined, testId, ariaLabel, title };
     navigations.push({
       label,
       method: 'router-push',
       target,
       kind: 'url',
-      triggerSelectorHint: {
-        text: label || undefined,
-        testId,
-        ariaLabel,
-      },
+      triggerSelectorHint: { ...hint, preferred: preferredSelector(hint) },
       sourceFile: sourceFileRelative,
       sourceLine: line,
       confidence: 'medium',
@@ -559,25 +565,144 @@ function passD(
         continue;
       }
 
-      const { label, testId, ariaLabel } = extractTriggerInfo(trigger);
+      const { label, testId, ariaLabel, title } = extractTriggerInfo(trigger);
 
+      const hint = { text: label || undefined, testId, ariaLabel, title };
       navigations.push({
         label,
         method: 'state-setter',
         target,
         kind: 'state',
         stateVar: sv.varName,
-        triggerSelectorHint: {
-          text: label || undefined,
-          testId,
-          ariaLabel,
-        },
+        triggerSelectorHint: { ...hint, preferred: preferredSelector(hint) },
         sourceFile: sourceFileRelative,
         sourceLine: line,
         confidence,
       });
     }
   }
+}
+
+// ─── Post-pass: scope classification ──────────────────────────────────────────
+
+/**
+ * Identifies the "app-root" source file path (project-root-relative).
+ * Heuristic: the file with the largest union among all detected state-vars, or
+ * the first file whose name is 'App.tsx' (case-insensitive) if no state-var
+ * has more than 1 member.
+ */
+function findRootFilePath(navigations: Navigation[]): string | null {
+  // Find the sourceFile whose state-setters cover the most distinct targets
+  const fileCounts = new Map<string, Set<string>>();
+  for (const nav of navigations) {
+    if (nav.method !== 'state-setter') continue;
+    if (!fileCounts.has(nav.sourceFile)) fileCounts.set(nav.sourceFile, new Set());
+    fileCounts.get(nav.sourceFile)!.add(nav.target);
+  }
+
+  let bestFile: string | null = null;
+  let bestCount = 0;
+  for (const [file, targets] of fileCounts) {
+    if (targets.size > bestCount) {
+      bestCount = targets.size;
+      bestFile = file;
+    }
+  }
+
+  // If the winner has only 1 target it's not a reliable signal — fall back to App.tsx name match
+  if (bestCount <= 1) {
+    for (const file of fileCounts.keys()) {
+      const basename = file.split('/').pop()?.toLowerCase() ?? '';
+      if (basename === 'app.tsx' || basename === 'app.jsx') return file;
+    }
+    return null;
+  }
+  return bestFile;
+}
+
+/**
+ * Classifies each navigation as 'top-level' or 'page-local'.
+ * URL-based navigations (link, router-link, router-push) and hash navs are always top-level.
+ * State-setters: top-level if the setter's sourceFile matches the root file; page-local otherwise.
+ * Falls back to top-level when the root file is ambiguous.
+ */
+function classifyScope(navigations: Navigation[]): Navigation[] {
+  const rootFile = findRootFilePath(navigations);
+
+  return navigations.map(nav => {
+    // URL-based and hash navigations are always top-level (crawler can reach them from any URL)
+    if (nav.method === 'link' || nav.method === 'router-link' || nav.method === 'router-push') {
+      return { ...nav, scope: 'top-level' as const };
+    }
+    if (nav.kind === 'hash') {
+      return { ...nav, scope: 'top-level' as const };
+    }
+
+    // State-setters: compare sourceFile to root
+    if (rootFile === null) return { ...nav, scope: 'top-level' as const };
+
+    const scope = nav.sourceFile === rootFile ? 'top-level' as const : 'page-local' as const;
+    return { ...nav, scope };
+  });
+}
+
+// ─── Post-pass: sibling-navigation counting + confidence drop ─────────────────
+
+const CONFIDENCE_DROP: Record<string, 'high' | 'medium' | 'low'> = {
+  high: 'medium',
+  medium: 'low',
+  low: 'low',
+};
+
+/**
+ * For each navigation, counts how many others in the same scope share the exact
+ * same text hint (case-insensitive, trimmed). When ambiguous and preferred === 'text',
+ * drops confidence one notch.
+ */
+function countSiblings(navigations: Navigation[]): Navigation[] {
+  // Group by (scope, normalizedText) — only non-empty text counts
+  const groups = new Map<string, Navigation[]>();
+  for (const nav of navigations) {
+    const text = nav.triggerSelectorHint.text?.trim().toLowerCase() ?? '';
+    if (text === '') continue;
+    const key = `${nav.scope ?? 'top-level'}::${text}`;
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key)!.push(nav);
+  }
+
+  return navigations.map(nav => {
+    const text = nav.triggerSelectorHint.text?.trim().toLowerCase() ?? '';
+    const key = `${nav.scope ?? 'top-level'}::${text}`;
+    const group = text !== '' ? (groups.get(key) ?? []) : [];
+    const siblingNavigations = Math.max(0, group.length - 1);
+
+    let { confidence } = nav;
+    if (siblingNavigations > 0 && nav.triggerSelectorHint.preferred === 'text') {
+      confidence = CONFIDENCE_DROP[confidence] ?? 'low';
+    }
+
+    return { ...nav, siblingNavigations, confidence };
+  });
+}
+
+// ─── Post-pass: cross-file duplicate count ────────────────────────────────────
+
+/**
+ * Counts navigations sharing (method, target, kind, scope). Sets duplicateCount = N - 1.
+ */
+function countDuplicates(navigations: Navigation[]): Navigation[] {
+  const groups = new Map<string, Navigation[]>();
+  for (const nav of navigations) {
+    const key = `${nav.method}::${nav.target}::${nav.kind}::${nav.scope ?? 'top-level'}`;
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key)!.push(nav);
+  }
+
+  return navigations.map(nav => {
+    const key = `${nav.method}::${nav.target}::${nav.kind}::${nav.scope ?? 'top-level'}`;
+    const group = groups.get(key) ?? [];
+    return { ...nav, duplicateCount: Math.max(0, group.length - 1) };
+  });
 }
 
 // ─── main extractor ──────────────────────────────────────────────────────────
@@ -681,5 +806,10 @@ export async function extractViteNavigations(
     } catch { /* skip file on parse error */ }
   }
 
-  return { navigations: allNavigations, skips: allSkips };
+  // Post-passes: scope classification → sibling counting → duplicate counting
+  const withScope = classifyScope(allNavigations);
+  const withSiblings = countSiblings(withScope);
+  const withDuplicates = countDuplicates(withSiblings);
+
+  return { navigations: withDuplicates, skips: allSkips };
 }
