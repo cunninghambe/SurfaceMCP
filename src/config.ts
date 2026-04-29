@@ -7,6 +7,17 @@ const SuccessCheckSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('redirect'), to: z.string() }),
   z.object({ kind: z.literal('cookie'), name: z.string() }),
   z.object({ kind: z.literal('status'), code: z.number().int() }),
+  // v0.18: JWT-bearer SPA support
+  z.object({
+    kind: z.literal('localStorage'),
+    key: z.string(),
+    tokenJsonPath: z.string().optional(),
+    minLength: z.number().int().positive().optional(),
+  }),
+  z.object({
+    kind: z.literal('dom_signal'),
+    selector: z.string(),
+  }),
 ]);
 
 const PreLoginSchema = z.object({

@@ -101,5 +101,9 @@ function checkSuccess(
       return cookies.some((c) => c.startsWith(`${check.name}=`));
     case 'status':
       return res.status === check.code;
+    case 'localStorage':
+    case 'dom_signal':
+      // Browser-only signals; HTTP login step optimistically succeeds.
+      return res.ok;
   }
 }

@@ -188,7 +188,9 @@ export type DescribeAuthResult =
 export type SuccessCheck =
   | { kind: 'redirect'; to: string }
   | { kind: 'cookie'; name: string }
-  | { kind: 'status'; code: number };
+  | { kind: 'status'; code: number }
+  | { kind: 'localStorage'; key: string; tokenJsonPath?: string; minLength?: number }
+  | { kind: 'dom_signal'; selector: string };
 
 export type RoleConfig = {
   name: string;

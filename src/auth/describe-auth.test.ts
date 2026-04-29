@@ -1,6 +1,10 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { buildDescribeAuth } from './describe-auth.js';
 import type { AuthConfig, RoleConfig } from '../types.js';
+import { loadConfig } from '../config.js';
+import { writeFileSync, rmSync } from 'node:fs';
+import { resolve } from 'node:path';
+import { tmpdir } from 'node:os';
 
 const formAuth: AuthConfig = {
   kind: 'form',
@@ -142,5 +146,126 @@ describe('buildDescribeAuth', () => {
     expect(result.authKind).toBe('form');
     if (result.authKind !== 'form') return;
     expect(result.values.password).toBe('');
+  });
+});
+
+// ─── v0.18 successCheck Zod parsing tests ────────────────────────────────────
+
+function makeTmpConfig(successCheck: unknown): string {
+  const configPath = resolve(tmpdir(), `surfacemcp-test-${Date.now()}-${Math.random().toString(36).slice(2)}.json`);
+  const config = {
+    surfaces: [{
+      name: 'test',
+      stack: 'vite',
+      root: '.',
+      baseUrl: 'http://localhost:3000',
+      port: 3102,
+      auth: {
+        kind: 'form',
+        loginMethod: 'POST',
+        loginPath: '/login',
+        loginFields: { email: 'email', password: 'password' },
+        bodyFormat: 'json',
+        successCheck,
+      },
+      roles: [{ name: 'owner', credentials: { email: 'a@b.com', password: 'secret' } }],
+    }],
+  };
+  writeFileSync(configPath, JSON.stringify(config));
+  return configPath;
+}
+
+const tmpFiles: string[] = [];
+afterEach(() => {
+  for (const f of tmpFiles.splice(0)) {
+    try { rmSync(f); } catch { /* ignore */ }
+  }
+});
+
+describe('SuccessCheckSchema — v0.18 localStorage + dom_signal variants', () => {
+  it('localStorage kind with key only — parses cleanly', () => {
+    const configPath = makeTmpConfig({ kind: 'localStorage', key: 'auth-storage' });
+    tmpFiles.push(configPath);
+    const config = loadConfig(configPath);
+    const check = config.surfaces[0]!.auth;
+    expect(check.kind).toBe('form');
+    if (check.kind !== 'form') return;
+    expect(check.successCheck).toEqual({ kind: 'localStorage', key: 'auth-storage' });
+  });
+
+  it('localStorage kind with tokenJsonPath + minLength — parses cleanly', () => {
+    const configPath = makeTmpConfig({ kind: 'localStorage', key: 'auth-storage', tokenJsonPath: 'state.token', minLength: 32 });
+    tmpFiles.push(configPath);
+    const config = loadConfig(configPath);
+    const check = config.surfaces[0]!.auth;
+    expect(check.kind).toBe('form');
+    if (check.kind !== 'form') return;
+    expect(check.successCheck).toEqual({ kind: 'localStorage', key: 'auth-storage', tokenJsonPath: 'state.token', minLength: 32 });
+  });
+
+  it('localStorage kind round-trips through buildDescribeAuth', () => {
+    const auth: AuthConfig = {
+      ...formAuth,
+      successCheck: { kind: 'localStorage', key: 'auth-storage', tokenJsonPath: 'state.token' },
+    };
+    const result = buildDescribeAuth(auth, ownerRole);
+    expect(result.authKind).toBe('form');
+    if (result.authKind !== 'form') return;
+    expect(result.successCheck).toEqual({ kind: 'localStorage', key: 'auth-storage', tokenJsonPath: 'state.token' });
+    expect(result.cookieName).toBeUndefined();
+  });
+
+  it('dom_signal kind — parses cleanly', () => {
+    const configPath = makeTmpConfig({ kind: 'dom_signal', selector: '[data-testid="user-menu"]' });
+    tmpFiles.push(configPath);
+    const config = loadConfig(configPath);
+    const check = config.surfaces[0]!.auth;
+    expect(check.kind).toBe('form');
+    if (check.kind !== 'form') return;
+    expect(check.successCheck).toEqual({ kind: 'dom_signal', selector: '[data-testid="user-menu"]' });
+  });
+
+  it('dom_signal kind round-trips through buildDescribeAuth', () => {
+    const auth: AuthConfig = {
+      ...formAuth,
+      successCheck: { kind: 'dom_signal', selector: '[data-testid="user-menu"]' },
+    };
+    const result = buildDescribeAuth(auth, ownerRole);
+    expect(result.authKind).toBe('form');
+    if (result.authKind !== 'form') return;
+    expect(result.successCheck).toEqual({ kind: 'dom_signal', selector: '[data-testid="user-menu"]' });
+    expect(result.cookieName).toBeUndefined();
+  });
+
+  it('localStorage kind missing key — Zod parse fails', () => {
+    const configPath = makeTmpConfig({ kind: 'localStorage' });
+    tmpFiles.push(configPath);
+    expect(() => loadConfig(configPath)).toThrow();
+  });
+
+  it('localStorage kind with empty key — Zod parses OK (runtime rejects)', () => {
+    const configPath = makeTmpConfig({ kind: 'localStorage', key: '', tokenJsonPath: 'a.b' });
+    tmpFiles.push(configPath);
+    const config = loadConfig(configPath);
+    const check = config.surfaces[0]!.auth;
+    expect(check.kind).toBe('form');
+    if (check.kind !== 'form') return;
+    expect(check.successCheck.kind).toBe('localStorage');
+  });
+
+  it('existing cookie / redirect / status successCheck kinds are unchanged', () => {
+    for (const sc of [
+      { kind: 'cookie', name: 'session' },
+      { kind: 'redirect', to: '/dashboard' },
+      { kind: 'status', code: 200 },
+    ] as const) {
+      const configPath = makeTmpConfig(sc);
+      tmpFiles.push(configPath);
+      const config = loadConfig(configPath);
+      const check = config.surfaces[0]!.auth;
+      expect(check.kind).toBe('form');
+      if (check.kind !== 'form') return;
+      expect(check.successCheck).toEqual(sc);
+    }
   });
 });
