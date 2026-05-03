@@ -401,24 +401,25 @@ function registerMetaTools(
   server.tool(
     'surface_describe_self',
     'Return metadata about this SurfaceMCP instance (stack, name, revision, capabilities).',
-    {},
-    async () => {
+    { surface: optSurface },
+    async (args) => {
+      const rt = resolveRuntime(registry, args.surface);
+      if ('error' in rt) return toolError('surface_required', rt.error);
       const listResponse = buildSurfaceListResponse(registry);
-      // Legacy fields from first surface for back-compat (deprecated in v0.3.0; removed in v0.4.0)
+      // Legacy fields from resolved surface for back-compat (deprecated in v0.3.0; removed in v0.4.0)
       // TODO: remove legacy fields in v0.4.0
-      const first = registry.surfaces.get(registry.order[0]!)!;
-      const isFirstReady = first.state.kind === 'ready';
+      const isReady = rt.state.kind === 'ready';
       return toolOk({
-        name: first.surface.name,
-        stack: first.surface.stack,
-        baseUrl: first.surface.baseUrl,
-        toolRevision: isFirstReady ? first.catalog.revision : 0,
-        pageRevision: isFirstReady ? first.pageCatalog.revision : 0,
+        name: rt.surface.name,
+        stack: rt.surface.stack,
+        baseUrl: rt.surface.baseUrl,
+        toolRevision: isReady ? rt.catalog.revision : 0,
+        pageRevision: isReady ? rt.pageCatalog.revision : 0,
         capabilities: {
-          listPages: first.surface.stack === 'vite',
-          listNavigations: first.surface.stack === 'vite',
+          listPages: rt.surface.stack === 'vite',
+          listNavigations: rt.surface.stack === 'vite',
           enumerateRoutesRuntime: true,
-          crawlSeed: first.surface.stack === 'vite',
+          crawlSeed: rt.surface.stack === 'vite',
         },
         surfaceMcpVersion: listResponse.surfaceMcpVersion,
         surfaces: listResponse.surfaces,
