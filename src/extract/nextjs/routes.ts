@@ -1,7 +1,7 @@
 import { readdirSync, existsSync } from 'node:fs';
 import { resolve, relative } from 'node:path';
 import { createHash } from 'node:crypto';
-import type { ToolMeta, SideEffectClass } from '../../types.js';
+import type { RawToolMeta, SideEffectClass } from '../../types.js';
 import { tryImportZodSchema, extractManualValidationSchemaFromFile } from './schemas.js';
 
 const HTTP_METHODS = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD', 'OPTIONS'] as const;
@@ -60,8 +60,8 @@ async function extractMethodsFromFile(
   apiPath: string,
   sourceRoot: string,
   zodAlias?: string
-): Promise<ToolMeta[]> {
-  const tools: ToolMeta[] = [];
+): Promise<RawToolMeta[]> {
+  const tools: RawToolMeta[] = [];
 
   // Detect exported HTTP method handlers by file content
   const { readFileSync } = await import('node:fs');
@@ -137,8 +137,8 @@ function walkDir(dir: string, files: string[] = []): string[] {
 export async function extractNextjsRoutes(
   root: string,
   zodAlias?: string
-): Promise<ToolMeta[]> {
-  const rawTools: ToolMeta[] = [];
+): Promise<RawToolMeta[]> {
+  const rawTools: RawToolMeta[] = [];
 
   // App Router: app/api/**
   const appApiDir = resolve(root, 'app', 'api');
@@ -181,7 +181,7 @@ export async function extractNextjsRoutes(
   return deduplicateTools(rawTools);
 }
 
-function deduplicateTools(tools: ToolMeta[]): ToolMeta[] {
+function deduplicateTools(tools: RawToolMeta[]): RawToolMeta[] {
   const nameCounts = new Map<string, number>();
   return tools.map((tool) => {
     const base = pathToToolName(tool.method, tool.path);

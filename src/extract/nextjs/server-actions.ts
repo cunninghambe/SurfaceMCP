@@ -2,7 +2,7 @@ import { readdirSync, existsSync, readFileSync } from 'node:fs';
 import { resolve, relative } from 'node:path';
 import { createHash } from 'node:crypto';
 import { Project, type SourceFile } from 'ts-morph';
-import type { ToolMeta } from '../../types.js';
+import type { RawToolMeta } from '../../types.js';
 import {
   classifyFileDirective,
   collectPatternA,
@@ -146,7 +146,7 @@ function deriveServerActionPath(action: ServerAction): string {
   return `/__action__/${action.definitionFile.replace(/\.(t|j)sx?$/, '')}/${action.name}`;
 }
 
-function mapServerActionsToToolMeta(actions: ServerAction[]): ToolMeta[] {
+function mapServerActionsToToolMeta(actions: ServerAction[]): RawToolMeta[] {
   return actions.map((action) => ({
     name: `serveraction_${action.name}__${sanitizePath(action.definitionFile)}`,
     toolId: computeToolId(action.name, action.definitionFile),
@@ -164,7 +164,7 @@ function mapServerActionsToToolMeta(actions: ServerAction[]): ToolMeta[] {
 
 // ─── Public entry point ───────────────────────────────────────────────────────
 
-export async function extractServerActions(root: string): Promise<ToolMeta[]> {
+export async function extractServerActions(root: string): Promise<RawToolMeta[]> {
   const actions = await findServerActionDefinitions(root);
   return mapServerActionsToToolMeta(actions);
 }

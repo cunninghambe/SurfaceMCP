@@ -1,11 +1,11 @@
 import { spawnSync } from 'node:child_process';
-import type { ToolMeta } from '../../types.js';
+import type { RawToolMeta } from '../../types.js';
 
 /**
  * Fallback extractor using django-extensions' show_urls command.
  * Only runs if django-extensions is installed in the target's venv.
  */
-export function extractViaDjangoExtensions(root: string): ToolMeta[] | null {
+export function extractViaDjangoExtensions(root: string): RawToolMeta[] | null {
   const result = spawnSync(
     'python3',
     ['manage.py', 'show_urls', '--format', 'json'],

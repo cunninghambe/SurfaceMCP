@@ -1,6 +1,6 @@
 import { loadConfig, findConfigPath } from '../config.js';
 import { loadEnvFiles } from '../env/indirection.js';
-import { regenerateCatalog, getCatalog } from '../server/tools-meta.js';
+import { regenerateCatalogForSurface, getCatalog } from '../server/tools-meta.js';
 import { resolve } from 'node:path';
 
 type RegenerateOptions = {
@@ -14,7 +14,7 @@ export async function runRegenerate(opts: RegenerateOptions): Promise<void> {
   const surface = config.surfaces[0]!;
   const root = resolve(projectRoot, surface.root);
 
-  await regenerateCatalog(surface, root);
+  await regenerateCatalogForSurface(surface, root);
   const catalog = getCatalog();
 
   console.log(`Regenerated. Revision: ${catalog.revision}, Tools: ${catalog.tools.length}`);

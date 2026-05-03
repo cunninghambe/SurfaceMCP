@@ -1,6 +1,6 @@
 import { loadConfig, findConfigPath } from '../config.js';
 import { loadEnvFiles } from '../env/indirection.js';
-import { regenerateCatalog } from '../server/tools-meta.js';
+import { regenerateCatalogForSurface } from '../server/tools-meta.js';
 import { resolve } from 'node:path';
 import type { ToolMeta } from '../types.js';
 
@@ -17,7 +17,7 @@ export async function runTools(opts: ToolsOptions): Promise<void> {
   const surface = config.surfaces[0]!;
   const root = resolve(projectRoot, surface.root);
 
-  await regenerateCatalog(surface, root);
+  await regenerateCatalogForSurface(surface, root);
 
   const { getCatalog } = await import('../server/tools-meta.js');
   const catalog = getCatalog();

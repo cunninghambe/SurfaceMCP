@@ -1,6 +1,6 @@
 {
   "name": "surfacemcp",
-  "version": "0.1.0",
+  "version": "0.3.0",
   "private": true,
   "description": "HTTP MCP server exposing a typed, introspectable, role-aware API surface for any target app",
   "type": "module",

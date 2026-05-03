@@ -1,7 +1,7 @@
 import { readFileSync, existsSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { createHash } from 'node:crypto';
-import type { ToolMeta, JsonSchema2020, SideEffectClass } from '../../types.js';
+import type { RawToolMeta, JsonSchema2020, SideEffectClass } from '../../types.js';
 
 type OpenApiSpec = {
   openapi?: string;
@@ -55,7 +55,7 @@ function parseSpec(content: string, filePath: string): OpenApiSpec {
   throw new Error('YAML OpenAPI specs require a YAML parser. Use JSON format or add yaml package.');
 }
 
-export function extractOpenApiRoutes(root: string): ToolMeta[] {
+export function extractOpenApiRoutes(root: string): RawToolMeta[] {
   const candidates = [
     'openapi.json',
     'openapi.yaml',
@@ -83,7 +83,7 @@ export function extractOpenApiRoutes(root: string): ToolMeta[] {
 
   if (!spec) return [];
 
-  const tools: ToolMeta[] = [];
+  const tools: RawToolMeta[] = [];
   const nameCounts = new Map<string, number>();
 
   for (const [path, methods] of Object.entries(spec.paths ?? {})) {
@@ -94,7 +94,7 @@ export function extractOpenApiRoutes(root: string): ToolMeta[] {
       if (!validMethods.includes(method.toLowerCase())) continue;
 
       let schema: JsonSchema2020 = { type: 'object', additionalProperties: true };
-      let confidence: ToolMeta['inputSchemaConfidence'] = 'unknown';
+      let confidence: RawToolMeta['inputSchemaConfidence'] = 'unknown';
 
       if (op.requestBody?.content) {
         const jsonContent =

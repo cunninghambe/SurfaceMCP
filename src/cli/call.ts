@@ -1,7 +1,7 @@
 import { loadConfig, findConfigPath } from '../config.js';
 import { loadEnvFiles } from '../env/indirection.js';
 import { RoleMutex } from '../auth/role-mutex.js';
-import { regenerateCatalog, getCatalog, getToolByName, getToolById } from '../server/tools-meta.js';
+import { regenerateCatalogForSurface, getCatalog, getToolByName, getToolById } from '../server/tools-meta.js';
 import { executeCall } from '../server/call.js';
 import { resolve } from 'node:path';
 
@@ -20,7 +20,7 @@ export async function runCall(opts: CallOptions): Promise<void> {
   const surface = config.surfaces[0]!;
   const root = resolve(projectRoot, surface.root);
 
-  await regenerateCatalog(surface, root);
+  await regenerateCatalogForSurface(surface, root);
   const catalog = getCatalog();
 
   const tool = getToolByName(opts.tool) ?? getToolById(opts.tool);
