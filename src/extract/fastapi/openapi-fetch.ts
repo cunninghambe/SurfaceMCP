@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import type { ToolMeta, JsonSchema2020, SideEffectClass } from '../../types.js';
+import type { RawToolMeta, JsonSchema2020, SideEffectClass } from '../../types.js';
 import { extractOpenApiRoutes } from '../openapi/parse.js';
 import { log } from '../../log.js';
 
@@ -54,7 +54,7 @@ function normalizeApiPath(path: string): string {
 function buildInputSchema(
   op: OpenApiOperation,
   method: string
-): { schema: JsonSchema2020; confidence: ToolMeta['inputSchemaConfidence'] } {
+): { schema: JsonSchema2020; confidence: RawToolMeta['inputSchemaConfidence'] } {
   // For POST/PUT/PATCH, use requestBody
   if (['post', 'put', 'patch'].includes(method.toLowerCase()) && op.requestBody?.content) {
     const jsonContent =
@@ -83,8 +83,8 @@ function buildInputSchema(
   return { schema: { type: 'object', additionalProperties: true }, confidence: 'unknown' };
 }
 
-function specToTools(spec: OpenApiSchema): ToolMeta[] {
-  const tools: ToolMeta[] = [];
+function specToTools(spec: OpenApiSchema): RawToolMeta[] {
+  const tools: RawToolMeta[] = [];
   const nameCounts = new Map<string, number>();
 
   for (const [path, methods] of Object.entries(spec.paths ?? {})) {
@@ -117,7 +117,7 @@ function specToTools(spec: OpenApiSchema): ToolMeta[] {
   return tools;
 }
 
-export async function fetchFastApiSchema(baseUrl: string, root?: string): Promise<ToolMeta[]> {
+export async function fetchFastApiSchema(baseUrl: string, root?: string): Promise<RawToolMeta[]> {
   const openApiUrl = `${baseUrl.replace(/\/$/, '')}/openapi.json`;
 
   let spec: OpenApiSchema | null = null;

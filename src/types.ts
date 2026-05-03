@@ -29,7 +29,11 @@ export type JsonSchema2020 = {
 export type InputSchemaConfidence = 'introspected' | 'inferred' | 'partial' | 'unknown';
 export type SideEffectClass = 'safe' | 'mutating' | 'external';
 
-export type ToolMeta = {
+/**
+ * Raw tool metadata as produced by per-stack extractors.
+ * Does not include surface-level fields populated by tools-meta.
+ */
+export type RawToolMeta = {
   name: string;
   toolId: string;
   method: string;
@@ -42,6 +46,15 @@ export type ToolMeta = {
   sourceLine: number;
   sourceFunctionName?: string;
   isServerAction: boolean;
+};
+
+export type ToolMeta = RawToolMeta & {
+  /** Wire name: `<surface>:<bareName>` in multi-surface configs; bare name in single-surface configs. */
+  name: string;
+  /** Bare name as produced by the per-stack extractor, never prefixed. */
+  bareName: string;
+  /** Owning surface name. */
+  surface: string;
 };
 
 export type ToolCatalog = {
@@ -221,6 +234,8 @@ export type SurfaceConfig = {
 
 export type Config = {
   surfaces: SurfaceConfig[];
+  /** Optional explicit MCP listen port. When unset, surfaces[0].port is used. */
+  mcpPort?: number;
 };
 
 /** Stored session state per role */
@@ -360,4 +375,57 @@ export type PostprocessedResult = {
     dedupedRoutes: number;
     fellBackToNone: boolean;
   };
+};
+
+// ─── Multi-surface registry types ─────────────────────────────────────────────
+
+export type SurfaceLifecycleState =
+  | { kind: 'ready' }
+  | { kind: 'extracting' }
+  | { kind: 'failed'; phase: 'extract' | 'login' | 'detect'; error: string };
+
+export type SurfaceRuntime = {
+  surface: SurfaceConfig;
+  resolvedRoot: string;
+  state: SurfaceLifecycleState;
+  catalog: ToolCatalog;
+  pageCatalog: PageCatalog;
+  navigationCatalog: NavigationCatalog;
+  roleMutex: import('./auth/role-mutex.js').RoleMutex | undefined;
+  watcher?: { close: () => Promise<void> };
+};
+
+export type SurfaceRegistry = {
+  /** Keyed by surface.name */
+  surfaces: Map<string, SurfaceRuntime>;
+  /** Insertion order — preserves config order */
+  order: string[];
+};
+
+export type ResolveError =
+  | { code: 'not_found'; message: string }
+  | { code: 'bare_name_ambiguous'; message: string; candidates: string[] }
+  | { code: 'unknown_surface'; message: string }
+  | { code: 'surface_not_ready'; message: string; surface: string; state: SurfaceLifecycleState };
+
+export type SurfaceSummary = {
+  name: string;
+  stack: Stack;
+  baseUrl: string;
+  state: SurfaceLifecycleState;
+  toolCount: number;
+  pageCount: number;
+  navigationCount: number;
+  toolRevision: number;
+  capabilities: {
+    listPages: boolean;
+    listNavigations: boolean;
+    enumerateRoutesRuntime: boolean;
+    crawlSeed: boolean;
+  };
+};
+
+export type SurfaceListResponse = {
+  surfaceMcpVersion: string;
+  surfaces: SurfaceSummary[];
 };

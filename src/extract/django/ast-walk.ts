@@ -1,7 +1,7 @@
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { resolve, dirname, relative } from 'node:path';
 import { createHash } from 'node:crypto';
-import type { ToolMeta, JsonSchema2020, SideEffectClass } from '../../types.js';
+import type { RawToolMeta, JsonSchema2020, SideEffectClass } from '../../types.js';
 
 type RouteEntry = {
   method: string;
@@ -231,7 +231,7 @@ function findRootUrlsFile(root: string): string | null {
 
 const EMPTY_SCHEMA: JsonSchema2020 = { type: 'object', additionalProperties: true };
 
-export function extractDjangoRoutes(root: string): ToolMeta[] {
+export function extractDjangoRoutes(root: string): RawToolMeta[] {
   const rootUrlsFile = findRootUrlsFile(root);
   if (!rootUrlsFile) return [];
 
@@ -239,7 +239,7 @@ export function extractDjangoRoutes(root: string): ToolMeta[] {
   const rawRoutes = walkUrlsFile(root, rootUrlsFile, '', visited);
 
   const nameCounts = new Map<string, number>();
-  const tools: ToolMeta[] = [];
+  const tools: RawToolMeta[] = [];
 
   for (const route of rawRoutes) {
     const base = pathToToolName(route.method, route.path);

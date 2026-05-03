@@ -1,7 +1,7 @@
 import { loadConfig, findConfigPath } from '../config.js';
 import { loadEnvFiles } from '../env/indirection.js';
 import { RoleMutex } from '../auth/role-mutex.js';
-import { regenerateCatalog, getCatalog } from '../server/tools-meta.js';
+import { regenerateCatalogForSurface, getCatalog } from '../server/tools-meta.js';
 import { resolve } from 'node:path';
 
 type DoctorOptions = {
@@ -34,7 +34,7 @@ export async function runDoctor(opts: DoctorOptions): Promise<void> {
   }
 
   // Regenerate and count tools
-  await regenerateCatalog(surface, root);
+  await regenerateCatalogForSurface(surface, root);
   const catalog = getCatalog();
   console.log(`Tools discovered: ${catalog.tools.length} (revision ${catalog.revision})`);
 

@@ -2,7 +2,7 @@ import { readdirSync, existsSync } from 'node:fs';
 import { resolve, relative } from 'node:path';
 import { createHash } from 'node:crypto';
 import { Project, SyntaxKind, type CallExpression, type SourceFile } from 'ts-morph';
-import type { ToolMeta, SideEffectClass } from '../../types.js';
+import type { RawToolMeta, SideEffectClass } from '../../types.js';
 import { resolveRouteSchema } from './schema-scope.js';
 import { buildMountIndex, joinPath } from './mounts.js';
 
@@ -92,7 +92,7 @@ export async function extractExpressRoutes(
   root: string,
   zodAlias?: string,
   bodyValidatorNames?: string[]
-): Promise<ToolMeta[]> {
+): Promise<RawToolMeta[]> {
   const schemaConfig = bodyValidatorNames ? { bodyValidatorNames } : undefined;
   const allFiles = walkDir(root);
 
@@ -115,7 +115,7 @@ export async function extractExpressRoutes(
   }
 
   const nameCounts = new Map<string, number>();
-  const tools: ToolMeta[] = [];
+  const tools: RawToolMeta[] = [];
 
   for (const route of rawRoutes) {
     const { callNode, sf } = route;

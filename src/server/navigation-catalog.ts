@@ -1,22 +1,14 @@
-import type { Navigation, NavigationCatalog, SurfaceConfig } from '../types.js';
+import type { Navigation, NavigationCatalog, SurfaceRuntime } from '../types.js';
 import { extractNavigationsForStack } from '../extract/navigations/index.js';
 import { log } from '../log.js';
-
-let navigationCatalog: NavigationCatalog = { revision: 0, navigations: [], skips: [] };
-
-export function getNavigationCatalog(): NavigationCatalog {
-  return navigationCatalog;
-}
 
 const CONFIDENCE_RANK: Record<string, number> = { high: 2, medium: 1, low: 0 };
 const PREFERRED_RANK: Record<string, number> = { testId: 3, ariaLabel: 2, text: 1, title: 0 };
 
 /**
  * Sorts navigations for catalog response.
- * Primary: confidence desc (high first).
- * Secondary: siblingNavigations asc (unique-text wins).
- * Tertiary: preferred desc (testId > ariaLabel > text > title > undefined).
- * Quaternary: sourceFile asc, sourceLine asc.
+ * Primary: confidence desc. Secondary: siblingNavigations asc.
+ * Tertiary: preferred desc. Quaternary: sourceFile asc, sourceLine asc.
  */
 function sortNavigations(navs: Navigation[]): Navigation[] {
   return [...navs].sort((a, b) => {
@@ -37,19 +29,27 @@ function sortNavigations(navs: Navigation[]): Navigation[] {
   });
 }
 
-export async function regenerateNavigationCatalog(surface: SurfaceConfig, root: string): Promise<void> {
+export async function regenerateNavigationCatalog(runtime: SurfaceRuntime, root: string): Promise<void> {
+  const { surface } = runtime;
   try {
     const { navigations, skips } = await extractNavigationsForStack(surface.stack, root);
-    navigationCatalog = {
-      revision: navigationCatalog.revision + 1,
+    runtime.navigationCatalog = {
+      revision: runtime.navigationCatalog.revision + 1,
       navigations: sortNavigations(navigations),
       skips,
     };
     if (skips.length > 0) {
-      log.info({ count: skips.length }, 'navigation extraction skips');
+      log.info({ surface: surface.name, count: skips.length }, 'navigation extraction skips');
     }
-    log.info({ revision: navigationCatalog.revision, count: navigations.length }, 'navigation catalog updated');
+    log.info({ surface: surface.name, revision: runtime.navigationCatalog.revision, count: navigations.length }, 'navigation catalog updated');
   } catch (err) {
-    log.error({ err }, 'navigation extraction error — navigation catalog unchanged');
+    log.error({ surface: surface.name, err }, 'navigation extraction error — navigation catalog unchanged');
   }
 }
+
+// ─── Legacy single accessor (for back-compat with http.ts meta-tools) ─────────
+
+let _legacyNavigationCatalog: NavigationCatalog = { revision: 0, navigations: [], skips: [] };
+
+export function setNavigationCatalog(c: NavigationCatalog): void { _legacyNavigationCatalog = c; }
+export function getNavigationCatalog(): NavigationCatalog { return _legacyNavigationCatalog; }

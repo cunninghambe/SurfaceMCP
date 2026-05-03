@@ -71,7 +71,14 @@ const RoleConfigSchema = z.object({
 });
 
 const SurfaceConfigSchema = z.object({
-  name: z.string().min(1),
+  name: z
+    .string()
+    .min(1)
+    .max(64)
+    .regex(/^[a-zA-Z0-9_-]+$/, {
+      message:
+        'Surface name must contain only [a-zA-Z0-9_-]. Reserved characters ":" and "." are not allowed because they are used in tool naming.',
+    }),
   stack: z.enum(['nextjs', 'express', 'fastapi', 'django', 'openapi', 'vite']),
   root: z.string(),
   baseUrl: z.string().url(),
@@ -92,9 +99,23 @@ const SurfaceConfigSchema = z.object({
   _suggestedExternalIntegrations: z.array(z.string()).optional(),
 });
 
-const ConfigSchema = z.object({
-  surfaces: z.array(SurfaceConfigSchema).min(1),
-});
+const ConfigSchema = z
+  .object({
+    surfaces: z.array(SurfaceConfigSchema).min(1),
+    /** Optional: explicit MCP listen port. When unset, surfaces[0].port is used. */
+    mcpPort: z.number().int().min(3102).max(3199).optional(),
+  })
+  .superRefine((cfg, ctx) => {
+    const names = cfg.surfaces.map((s) => s.name);
+    const dup = names.find((n, i) => names.indexOf(n) !== i);
+    if (dup !== undefined) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['surfaces'],
+        message: `Duplicate surface name: "${dup}". Surface names must be unique.`,
+      });
+    }
+  });
 
 export function loadConfig(configPath: string): Config {
   if (!existsSync(configPath)) {
