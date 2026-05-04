@@ -111,7 +111,10 @@ function resolveRuntime(
     if (!rt) return { error: `Unknown surface: "${surfaceArg}". Known: ${registry.order.join(', ')}` };
     return rt;
   }
-  if (registry.order.length === 1) {
+  if (registry.order.length >= 1) {
+    // When no surface arg is provided, default to the first surface.
+    // This preserves single-surface back-compat and allows multi-surface
+    // consumers that don't specify a surface to get the primary surface.
     return registry.surfaces.get(registry.order[0]!)!;
   }
   return { error: 'Multiple surfaces are configured. Specify surface: <name>.' };
@@ -181,6 +184,8 @@ function registerMetaTools(
       allowExternal: z.boolean().optional(),
       noAutoRelogin: z.boolean().optional(),
       pinRevision: z.number().int().optional(),
+      /** #181: BugHunter cookie_endpoint session cookie to forward to the backend API. */
+      extraCookie: z.string().optional(),
     },
     async (args) => {
       const resolved = resolveTool(registry, { name: args.name, toolId: args.toolId });
@@ -222,6 +227,7 @@ function registerMetaTools(
         pinRevision: args.pinRevision,
         currentRevision: runtime.catalog.revision,
         timeoutMs: args.timeoutMs,
+        extraCookie: args.extraCookie,
       });
       return toolOk(result);
     }
