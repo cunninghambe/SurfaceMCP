@@ -22,13 +22,16 @@ type CallParams = {
   pinRevision?: number;
   currentRevision: number;
   timeoutMs?: number;
+  /** #181: caller-supplied cookie to merge into the Cookie header (overrides nothing; appended). */
+  extraCookie?: string;
 };
 
 function buildHeaders(
   auth: AuthConfig,
   session: { cookies?: string[]; token?: string } | undefined,
   roleCredentials: Record<string, string>,
-  projectName: string
+  projectName: string,
+  extraCookie?: string
 ): Record<string, string> {
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
@@ -36,32 +39,42 @@ function buildHeaders(
     'X-Surface-Origin': `surfacemcp/${projectName}`,
   };
 
-  if (!session) return headers;
+  const sessionCookies: string[] = [];
 
-  switch (auth.kind) {
-    case 'form':
-    case 'nextauth':
-      if (session.cookies && session.cookies.length > 0) {
-        headers['Cookie'] = session.cookies
-          .map((c) => c.split(';')[0])
-          .join('; ');
+  if (session) {
+    switch (auth.kind) {
+      case 'form':
+      case 'nextauth':
+        if (session.cookies && session.cookies.length > 0) {
+          sessionCookies.push(...session.cookies.map((c) => c.split(';')[0]));
+        }
+        break;
+      case 'bearer':
+        if (session.token) {
+          headers['Authorization'] = `Bearer ${session.token}`;
+        }
+        break;
+      case 'api_key': {
+        const resolved = resolveCredentials(roleCredentials);
+        const cred = getApiKey(auth, resolved);
+        if (cred.header) {
+          headers[cred.header.name] = cred.header.value;
+        }
+        break;
       }
-      break;
-    case 'bearer':
-      if (session.token) {
-        headers['Authorization'] = `Bearer ${session.token}`;
-      }
-      break;
-    case 'api_key': {
-      const resolved = resolveCredentials(roleCredentials);
-      const cred = getApiKey(auth, resolved);
-      if (cred.header) {
-        headers[cred.header.name] = cred.header.value;
-      }
-      break;
+      case 'none':
+        break;
     }
-    case 'none':
-      break;
+  }
+
+  // #181: merge caller-supplied extraCookie (from BugHunter's cookie_endpoint login path)
+  // with any session cookies so both reach the backend.
+  if (extraCookie !== undefined && extraCookie !== '') {
+    sessionCookies.push(extraCookie);
+  }
+
+  if (sessionCookies.length > 0) {
+    headers['Cookie'] = sessionCookies.join('; ');
   }
 
   return headers;
@@ -171,7 +184,7 @@ export async function executeCall(params: CallParams): Promise<SurfaceCallResult
   const method = params.tool.method;
 
   const makeRequest = async (sess: typeof session): Promise<SurfaceCallResult> => {
-    const headers = buildHeaders(params.auth, sess, roleCredentials, params.projectName);
+    const headers = buildHeaders(params.auth, sess, roleCredentials, params.projectName, params.extraCookie);
 
     let fetchBody: string | undefined;
     let fetchUrl = url;
