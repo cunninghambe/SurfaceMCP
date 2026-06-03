@@ -8,6 +8,13 @@ import { log } from '../log.js';
 type LoginFn = () => Promise<RoleSession>;
 
 /**
+ * The canonical anonymous role. A built-in: it need not be declared in
+ * surfacemcp.config.json roles[]. Requests made as this role go unauthenticated,
+ * so the public surface can always be exercised (BugHunter's no-login default).
+ */
+const ANONYMOUS_ROLE_NAME = 'anonymous';
+
+/**
  * Per-role mutex: ensures only one login is in-flight at a time per role.
  * Concurrent callers that arrive during a refresh queue and reuse the result.
  */
@@ -39,7 +46,13 @@ export class RoleMutex {
     const existing = this.inflight.get(roleName);
     if (existing) return existing;
 
-    const role = this.roles.find((r) => r.name === roleName);
+    let role = this.roles.find((r) => r.name === roleName);
+    // 'anonymous' is a built-in credential-less role — synthesize it when the
+    // config declares no matching role, so doLogin() returns an unauthenticated
+    // session instead of throwing "Unknown role: anonymous".
+    if (!role && roleName === ANONYMOUS_ROLE_NAME) {
+      role = { name: ANONYMOUS_ROLE_NAME };
+    }
     if (!role) throw new Error(`Unknown role: ${roleName}`);
 
     const promise = this.doLogin(role);
