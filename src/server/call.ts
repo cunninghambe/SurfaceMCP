@@ -3,6 +3,7 @@ import type { RoleMutex } from '../auth/role-mutex.js';
 import { shouldAutoRelogin } from '../auth/refresh-policy.js';
 import { getApiKey } from '../auth/api-key.js';
 import { resolveCredentials } from '../env/indirection.js';
+import { substitutePathParams } from './path-params.js';
 import { log } from '../log.js';
 
 const BODY_MAX_BYTES = 64 * 1024; // 64 KB
@@ -180,7 +181,24 @@ export async function executeCall(params: CallParams): Promise<SurfaceCallResult
   const roleConfig = params.roleMutex['roles']?.find((r: { name: string }) => r.name === params.role);
   const roleCredentials = roleConfig?.credentials ?? {};
 
-  const url = `${params.baseUrl.replace(/\/$/, '')}${params.tool.path}`;
+  // Substitute :id / {id} / <int:pk> path params from input into the URL, then
+  // strip the consumed keys so they aren't also sent as query/body.
+  const sub = substitutePathParams(params.tool.path, params.input);
+  if (!sub.ok) {
+    return {
+      ok: false,
+      error: {
+        code: 'missing_path_param',
+        message: `Missing required path parameter(s): ${sub.missing.join(', ')}`,
+      },
+      durationMs: Date.now() - start,
+      revisionAtCall: params.currentRevision,
+    };
+  }
+  const url = `${params.baseUrl.replace(/\/$/, '')}${sub.path}`;
+  const bodyInput = sub.consumed.size
+    ? Object.fromEntries(Object.entries(params.input).filter(([k]) => !sub.consumed.has(k)))
+    : params.input;
   const method = params.tool.method;
 
   const makeRequest = async (sess: typeof session): Promise<SurfaceCallResult> => {
@@ -191,16 +209,20 @@ export async function executeCall(params: CallParams): Promise<SurfaceCallResult
 
     if (['GET', 'HEAD', 'OPTIONS', 'DELETE'].includes(method)) {
       // Append query params for GET-like methods
-      if (Object.keys(params.input).length > 0) {
+      if (Object.keys(bodyInput).length > 0) {
         const qp = new URLSearchParams(
           Object.fromEntries(
-            Object.entries(params.input).map(([k, v]) => [k, String(v)])
+            Object.entries(bodyInput).map(([k, v]) => [
+              k,
+              // Objects/arrays would stringify to "[object Object]"; JSON-encode them.
+              v !== null && typeof v === 'object' ? JSON.stringify(v) : String(v),
+            ])
           )
         );
         fetchUrl = `${url}?${qp.toString()}`;
       }
     } else {
-      fetchBody = JSON.stringify(params.input);
+      fetchBody = JSON.stringify(bodyInput);
     }
 
     const timeoutMs = params.timeoutMs ?? 30_000;

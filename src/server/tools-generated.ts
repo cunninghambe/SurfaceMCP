@@ -3,19 +3,9 @@ import { z } from 'zod';
 import type { ToolMeta, SurfaceConfig, ToolCatalog } from '../types.js';
 import type { RoleMutex } from '../auth/role-mutex.js';
 import { executeCall } from './call.js';
+import { jsonSchemaToZod } from './schema-to-zod.js';
+import { extractPathParams, withPathParams } from './path-params.js';
 import { log } from '../log.js';
-
-/**
- * Build a zod schema shape from a JSON Schema 2020-12 object.
- * Used so MCP SDK can render tool parameters correctly.
- */
-function jsonSchemaToZod(schema: ToolMeta['inputSchema']): z.ZodTypeAny {
-  if (!schema || schema.type === 'object' || !schema.type) {
-    // Pass-through: accept any additional properties
-    return z.record(z.unknown());
-  }
-  return z.record(z.unknown());
-}
 
 export function registerGeneratedTools(
   server: McpServer,
@@ -37,6 +27,12 @@ function registerOneTool(
   roleMutex: RoleMutex,
   _root: string
 ): void {
+  const pathParams = extractPathParams(tool.path);
+  const effectiveSchema = withPathParams(tool.inputSchema, pathParams);
+  const inputDescription = pathParams.length > 0
+    ? `Request body / query params (include path params: ${pathParams.map((p) => p.name).join(', ')})`
+    : 'Request body / query params';
+
   const description =
     `${tool.method} ${tool.path} | confidence:${tool.inputSchemaConfidence} | ` +
     `effect:${tool.sideEffectClass} | toolId:${tool.toolId}` +
@@ -47,7 +43,7 @@ function registerOneTool(
     description,
     {
       role: z.string().min(1).describe('Role to execute as (must be declared in config)'),
-      input: jsonSchemaToZod(tool.inputSchema).describe('Request body / query params'),
+      input: jsonSchemaToZod(effectiveSchema).describe(inputDescription),
       timeoutMs: z.number().int().min(1).max(300_000).optional().describe('Request timeout in ms'),
       allowExternal: z.boolean().optional().describe('Allow external side-effect calls'),
       noAutoRelogin: z.boolean().optional().describe('Disable auto-relogin on 401'),

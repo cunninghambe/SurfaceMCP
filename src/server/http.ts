@@ -28,6 +28,7 @@ import {
   resolveTool,
 } from './registry.js';
 import { registerGeneratedTools } from './tools-generated.js';
+import { installShutdown } from './shutdown.js';
 
 const RUNTIME_ENUM_SCHEMA = {
   $schema: 'https://json-schema.org/draft/2020-12/schema',
@@ -490,6 +491,8 @@ export async function createApp(
   const registry = await buildRegistry(config, projectRoot);
 
   const app = express();
+  // Exposed so entry points can close watchers on graceful shutdown.
+  app.locals.registry = registry;
   app.use(express.json({ limit: '4mb' }));
 
   app.post('/mcp', async (req: Request, res: Response) => {
@@ -563,6 +566,7 @@ if (isEntrypoint) {
       }
       process.exit(1);
     });
+    installShutdown(server, { registry: app.locals.registry as SurfaceRegistry | undefined });
   }).catch((err: unknown) => {
     log.error({ err }, 'Failed to start SurfaceMCP');
     process.exit(1);

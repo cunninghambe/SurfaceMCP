@@ -1,32 +1,16 @@
 import { readdirSync, existsSync } from 'node:fs';
 import { resolve, relative } from 'node:path';
-import { createHash } from 'node:crypto';
-import type { RawToolMeta, SideEffectClass } from '../../types.js';
+import type { RawToolMeta } from '../../types.js';
 import { tryImportZodSchema, extractManualValidationSchemaFromFile } from './schemas.js';
+import { toolId, pathToToolName, methodToSideEffect } from '../common.js';
 
 const HTTP_METHODS = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD', 'OPTIONS'] as const;
 type HttpMethod = typeof HTTP_METHODS[number];
 
-function toolId(method: string, path: string): string {
-  return createHash('sha1').update(`${method}:${normalizePath(path)}`).digest('hex').slice(0, 12);
-}
-
+// App/Pages Router bracket params -> `:param`. Applied before toolId/pathToToolName,
+// so the shared helpers receive an already-normalized path (identical output).
 function normalizePath(p: string): string {
   return p.replace(/\[\.\.\.(\w+)\]/g, ':$1').replace(/\[(\w+)\]/g, ':$1');
-}
-
-function pathToToolName(method: string, path: string): string {
-  const normalized = normalizePath(path)
-    .replace(/^\//, '')
-    .replace(/[/:]/g, '_')
-    .replace(/_+/g, '_')
-    .replace(/^_|_$/g, '');
-  return `${method.toLowerCase()}_${normalized || 'root'}`;
-}
-
-function methodToSideEffect(method: string): SideEffectClass {
-  if (['GET', 'HEAD', 'OPTIONS'].includes(method)) return 'safe';
-  return 'mutating';
 }
 
 /**
