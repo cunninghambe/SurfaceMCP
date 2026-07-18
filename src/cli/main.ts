@@ -136,7 +136,7 @@ Commands:
   export        Emit an OpenAPI 3.1 doc for the surface (--surface, --out)
 
 Options:
-  --stack=<nextjs|express|fastify|fastapi|django|openapi>
+  --stack=<nextjs|express|fastify|nestjs|fastapi|django|openapi>
   --base-url=<url>
   --project-root=<path>
   --multi-surface
