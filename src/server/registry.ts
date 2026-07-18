@@ -80,15 +80,36 @@ export async function buildRegistry(config: Config, projectRoot: string): Promis
       const watchPaths = (runtime.surface.watchPaths ?? ['app', 'pages', 'src']).map((p) =>
         resolve(runtime.resolvedRoot, p)
       );
+      // Serialize regens per surface: a change mid-regen would otherwise race on
+      // runtime.catalog. All three catalogs are refreshed (the tool catalog is a
+      // no-op for the vite stack, but pages/navigations are not).
+      let regenerating = false;
+      let regenPending = false;
+      const runRegen = async (): Promise<void> => {
+        if (runtime.state.kind === 'failed') return;
+        if (regenerating) {
+          regenPending = true;
+          return;
+        }
+        regenerating = true;
+        try {
+          await regenerateCatalog(runtime, runtime.resolvedRoot, multiSurface);
+          await regeneratePageCatalog(runtime, runtime.resolvedRoot);
+          await regenerateNavigationCatalog(runtime, runtime.resolvedRoot);
+        } catch (err) {
+          log.error({ surface: name, err }, 'watcher regen failed');
+        } finally {
+          regenerating = false;
+          if (regenPending) {
+            regenPending = false;
+            void runRegen();
+          }
+        }
+      };
       const watcher = startWatcher({
         watchPaths,
         extraIgnore: runtime.surface.watchIgnore,
-        onRegen: () => {
-          if (runtime.state.kind === 'failed') return;
-          regenerateCatalog(runtime, runtime.resolvedRoot, multiSurface).catch((err) =>
-            log.error({ surface: name, err }, 'watcher regen failed')
-          );
-        },
+        onRegen: () => void runRegen(),
       });
       runtime.watcher = { close: () => watcher.close() };
     })
@@ -249,5 +270,19 @@ export function buildSurfaceListResponse(registry: SurfaceRegistry): SurfaceList
 
 export function getMcpPort(config: Config): number {
   return config.mcpPort ?? config.surfaces[0]!.port;
+}
+
+/** Close every per-surface file watcher. Safe to call more than once. */
+export async function closeRegistry(registry: SurfaceRegistry): Promise<void> {
+  for (const name of registry.order) {
+    const runtime = registry.surfaces.get(name);
+    if (!runtime?.watcher) continue;
+    try {
+      await runtime.watcher.close();
+    } catch (err) {
+      log.warn({ surface: name, err }, 'watcher close failed');
+    }
+    runtime.watcher = undefined;
+  }
 }
 

@@ -1,9 +1,11 @@
 import { resolve } from 'node:path';
-import { spawn } from 'node:child_process';
+import { spawn, type ChildProcess } from 'node:child_process';
 import { loadConfig, findConfigPath } from '../config.js';
 import { loadEnvFiles } from '../env/indirection.js';
 import { createApp } from '../server/http.js';
 import { getMcpPort } from '../server/registry.js';
+import { installShutdown } from '../server/shutdown.js';
+import type { SurfaceRegistry } from '../types.js';
 import { log } from '../log.js';
 
 type ServeOptions = {
@@ -32,6 +34,9 @@ export async function runServe(opts: ServeOptions): Promise<void> {
   loadEnvFiles(projectRoot);
   const config = loadConfig(configPath);
 
+  // Dev-server children we launch, so shutdown can terminate them.
+  const devChildren: ChildProcess[] = [];
+
   // Launch dev servers for all surfaces that need it
   await Promise.all(
     config.surfaces.map(async (surface) => {
@@ -50,6 +55,7 @@ export async function runServe(opts: ServeOptions): Promise<void> {
         stdio: 'inherit',
         detached: false,
       });
+      devChildren.push(devProc);
       devProc.on('error', (err) => log.error({ surface: surface.name, err }, 'dev server launch error'));
       const ready = await waitForBaseUrl(surface.baseUrl);
       if (!ready) {
@@ -73,5 +79,9 @@ export async function runServe(opts: ServeOptions): Promise<void> {
       log.error({ err }, 'HTTP server error');
     }
     process.exit(1);
+  });
+  installShutdown(server, {
+    registry: app.locals.registry as SurfaceRegistry | undefined,
+    children: devChildren,
   });
 }
