@@ -110,7 +110,7 @@ async function probeSchema(
 }
 
 /** Resolve a surface name from args with multi-surface aware back-compat. */
-function resolveRuntime(
+export function resolveRuntime(
   registry: SurfaceRegistry,
   surfaceArg?: string
 ): SurfaceRuntime | { error: string } {
@@ -119,13 +119,16 @@ function resolveRuntime(
     if (!rt) return { error: `Unknown surface: "${surfaceArg}". Known: ${registry.order.join(', ')}` };
     return rt;
   }
-  if (registry.order.length >= 1) {
-    // When no surface arg is provided, default to the first surface.
-    // This preserves single-surface back-compat and allows multi-surface
-    // consumers that don't specify a surface to get the primary surface.
+  // Only default to the sole surface when there is exactly one. In a
+  // multi-surface config, silently picking the first would route a caller to
+  // the wrong app's API; require an explicit surface (mirrors resolveTool).
+  if (registry.order.length === 1) {
     return registry.surfaces.get(registry.order[0]!)!;
   }
-  return { error: 'Multiple surfaces are configured. Specify surface: <name>.' };
+  if (registry.order.length === 0) {
+    return { error: 'No surfaces are configured.' };
+  }
+  return { error: `Multiple surfaces are configured. Specify surface: <name>. Known: ${registry.order.join(', ')}` };
 }
 
 function registerMetaTools(

@@ -5,7 +5,7 @@ import { loadEnvFiles } from '../env/indirection.js';
 import { createApp } from '../server/http.js';
 import { getMcpPort } from '../server/registry.js';
 import { installShutdown } from '../server/shutdown.js';
-import type { SurfaceRegistry } from '../types.js';
+import type { SurfaceRegistry, SurfaceConfig } from '../types.js';
 import { log } from '../log.js';
 
 type ServeOptions = {
@@ -27,6 +27,38 @@ async function waitForBaseUrl(baseUrl: string, timeoutMs = 60_000): Promise<bool
   return false;
 }
 
+/**
+ * Launch a surface's dev server if its baseUrl isn't already reachable. Runs in
+ * the background (never awaited by startup) so the MCP endpoint isn't held up.
+ */
+async function launchDevServer(
+  surface: SurfaceConfig,
+  projectRoot: string,
+  devChildren: ChildProcess[],
+): Promise<void> {
+  if (!surface.launchDevCommand) return;
+  const resolvedRoot = resolve(projectRoot, surface.root);
+  try {
+    const res = await fetch(surface.baseUrl, { signal: AbortSignal.timeout(2_000) });
+    if (res.status < 500) return; // already running
+  } catch {
+    // not reachable — launch it below
+  }
+  log.info({ surface: surface.name, cmd: surface.launchDevCommand }, 'baseUrl unreachable — launching dev server');
+  const devProc = spawn(surface.launchDevCommand, {
+    shell: true,
+    cwd: resolvedRoot,
+    stdio: 'inherit',
+    detached: false,
+  });
+  devChildren.push(devProc);
+  devProc.on('error', (err) => log.error({ surface: surface.name, err }, 'dev server launch error'));
+  const ready = await waitForBaseUrl(surface.baseUrl);
+  if (!ready) {
+    log.warn({ surface: surface.name, baseUrl: surface.baseUrl }, 'dev server did not become ready in 60s');
+  }
+}
+
 export async function runServe(opts: ServeOptions): Promise<void> {
   const projectRoot = resolve(opts.projectRoot ?? process.cwd());
   const configPath = opts.configPath ?? process.env.SURFACEMCP_CONFIG ?? findConfigPath(projectRoot);
@@ -37,32 +69,15 @@ export async function runServe(opts: ServeOptions): Promise<void> {
   // Dev-server children we launch, so shutdown can terminate them.
   const devChildren: ChildProcess[] = [];
 
-  // Launch dev servers for all surfaces that need it
-  await Promise.all(
-    config.surfaces.map(async (surface) => {
-      if (!surface.launchDevCommand) return;
-      const resolvedRoot = resolve(projectRoot, surface.root);
-      try {
-        const res = await fetch(surface.baseUrl, { signal: AbortSignal.timeout(2_000) });
-        if (res.status < 500) return;
-      } catch {
-        // not reachable
-      }
-      log.info({ surface: surface.name, cmd: surface.launchDevCommand }, 'baseUrl unreachable — launching dev server');
-      const devProc = spawn(surface.launchDevCommand, {
-        shell: true,
-        cwd: resolvedRoot,
-        stdio: 'inherit',
-        detached: false,
-      });
-      devChildren.push(devProc);
-      devProc.on('error', (err) => log.error({ surface: surface.name, err }, 'dev server launch error'));
-      const ready = await waitForBaseUrl(surface.baseUrl);
-      if (!ready) {
-        log.warn({ surface: surface.name, baseUrl: surface.baseUrl }, 'dev server did not become ready in 60s — proceeding anyway');
-      }
-    })
-  );
+  // Launch dev servers in the background. The MCP endpoint must come up
+  // immediately and stay responsive — it must NOT block for up to 60s waiting on
+  // an unreachable target (that made the e2e suite untrustworthy). Extraction is
+  // static and login is lazy (on first surface_call), so the target only needs to
+  // be reachable by the time an authenticated call is made, not at startup.
+  for (const surface of config.surfaces) {
+    if (!surface.launchDevCommand) continue;
+    void launchDevServer(surface, projectRoot, devChildren);
+  }
 
   const port = getMcpPort(config);
   const app = await createApp(config, projectRoot);

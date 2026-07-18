@@ -104,6 +104,12 @@ async function main(): Promise<void> {
       break;
     }
 
+    case 'schema': {
+      const { runSchema } = await import('./schema.js');
+      runSchema();
+      break;
+    }
+
     default:
       console.log(`
 surfacemcp — HTTP MCP server for typed API surface discovery
@@ -116,6 +122,7 @@ Commands:
   probe <tool>  Recover schema from validation error response
   regenerate    Force re-extraction
   doctor        Validate config, test logins, check ports
+  schema        Print the JSON Schema for surfacemcp.config.json
 
 Options:
   --stack=<nextjs|express|fastapi|django|openapi>

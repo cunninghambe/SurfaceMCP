@@ -21,6 +21,20 @@ Working implementation, **v0.3.1**. Multi-surface, role-aware, with unit + e2e t
 
 ## Install
 
+As a CLI, globally:
+
+```bash
+npm install -g surfacemcp
+```
+
+Or run without installing:
+
+```bash
+npx surfacemcp <command>
+```
+
+From source (for development):
+
 ```bash
 npm install
 npm run build
@@ -58,6 +72,21 @@ The server speaks Streamable HTTP MCP at `POST /mcp` on the allocated port (boun
 | `probe <tool>` | Recover a schema from the target's validation-error response. |
 | `regenerate` | Force re-extraction of the catalog. |
 | `doctor` | Validate config, test logins, check port allocation. |
+| `schema` | Print the JSON Schema for `surfacemcp.config.json` (for editor autocomplete). |
+
+`serve` starts the MCP endpoint immediately and never blocks on the target: if a
+surface sets `launchDevCommand` and its `baseUrl` isn't reachable, the dev server
+is launched in the background while the endpoint stays responsive. Logins are
+lazy (on first `surface_call`), so the target only needs to be up by the time an
+authenticated call is made.
+
+For editor autocomplete/validation of your config, generate the schema and
+reference it:
+
+```bash
+surfacemcp schema > surfacemcp.config.schema.json
+# then add "$schema": "./surfacemcp.config.schema.json" to surfacemcp.config.json
+```
 
 ## MCP tools exposed to agents
 

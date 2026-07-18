@@ -1,6 +1,9 @@
 import { describe, it, expect } from 'vitest';
 import { z } from 'zod';
-import { findLiteralCredentialPaths } from './config.js';
+import { writeFileSync, rmSync } from 'node:fs';
+import { join } from 'node:path';
+import { tmpdir } from 'node:os';
+import { findLiteralCredentialPaths, loadConfig, configJsonSchema } from './config.js';
 import type { Config } from './types.js';
 
 // Re-export config internals for testing by re-parsing via loadConfig
@@ -153,5 +156,44 @@ describe('findLiteralCredentialPaths', () => {
   it('ignores roles without credentials', () => {
     const cfg = cfgWithRoles([{ name: 'anon' }]);
     expect(findLiteralCredentialPaths(cfg)).toEqual([]);
+  });
+});
+
+describe('loadConfig — schemaIntrospection.bodyValidatorNames', () => {
+  const path = join(tmpdir(), `surfacemcp-cfg-bvn-test.json`);
+  const base = {
+    surfaces: [
+      {
+        name: 'web',
+        stack: 'express',
+        root: '.',
+        baseUrl: 'http://localhost:3000',
+        port: 3140,
+        auth: { kind: 'none' },
+        roles: [],
+      },
+    ],
+  };
+
+  it('preserves bodyValidatorNames through parse (regression: was silently dropped)', () => {
+    const cfg = structuredClone(base);
+    // @ts-expect-error building raw JSON
+    cfg.surfaces[0].schemaIntrospection = { bodyValidatorNames: ['validateBody', 'check'] };
+    writeFileSync(path, JSON.stringify(cfg));
+    try {
+      const loaded = loadConfig(path);
+      expect(loaded.surfaces[0]!.schemaIntrospection?.bodyValidatorNames).toEqual(['validateBody', 'check']);
+    } finally {
+      rmSync(path, { force: true });
+    }
+  });
+});
+
+describe('configJsonSchema', () => {
+  it('emits a JSON Schema describing the config surfaces', () => {
+    const schema = configJsonSchema() as Record<string, unknown>;
+    const json = JSON.stringify(schema);
+    expect(json).toContain('surfaces');
+    expect(json).toContain('bodyValidatorNames');
   });
 });
