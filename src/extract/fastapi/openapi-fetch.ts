@@ -1,6 +1,6 @@
-import { createHash } from 'node:crypto';
-import type { RawToolMeta, JsonSchema2020, SideEffectClass } from '../../types.js';
+import type { RawToolMeta, JsonSchema2020 } from '../../types.js';
 import { extractOpenApiRoutes } from '../openapi/parse.js';
+import { toolId, pathToToolName, methodToSideEffect } from '../common.js';
 import { log } from '../../log.js';
 
 type OpenApiSchema = {
@@ -27,25 +27,6 @@ type OpenApiOperation = {
   }>;
   responses?: Record<string, unknown>;
 };
-
-function toolId(method: string, path: string): string {
-  return createHash('sha1').update(`${method}:${path}`).digest('hex').slice(0, 12);
-}
-
-function pathToToolName(method: string, path: string): string {
-  const normalized = path
-    .replace(/^\//, '')
-    .replace(/[/{:]/g, '_')
-    .replace(/}/g, '')
-    .replace(/_+/g, '_')
-    .replace(/^_|_$/g, '');
-  return `${method.toLowerCase()}_${normalized || 'root'}`;
-}
-
-function methodToSideEffect(method: string): SideEffectClass {
-  if (['get', 'head', 'options'].includes(method.toLowerCase())) return 'safe';
-  return 'mutating';
-}
 
 function normalizeApiPath(path: string): string {
   return path.replace(/\{(\w+)\}/g, ':$1');

@@ -1,35 +1,10 @@
 import { readdirSync, existsSync } from 'node:fs';
 import { resolve, relative } from 'node:path';
-import { createHash } from 'node:crypto';
 import { Project, SyntaxKind, type CallExpression, type SourceFile } from 'ts-morph';
-import type { RawToolMeta, SideEffectClass } from '../../types.js';
+import type { RawToolMeta } from '../../types.js';
 import { resolveRouteSchema } from './schema-scope.js';
 import { buildMountIndex, joinPath } from './mounts.js';
-
-function toolId(method: string, path: string): string {
-  return createHash('sha1')
-    .update(`${method}:${normalizePath(path)}`)
-    .digest('hex')
-    .slice(0, 12);
-}
-
-function normalizePath(p: string): string {
-  return p.replace(/:(\w+)/g, ':$1');
-}
-
-function pathToToolName(method: string, path: string): string {
-  const normalized = normalizePath(path)
-    .replace(/^\//, '')
-    .replace(/[/:]/g, '_')
-    .replace(/_+/g, '_')
-    .replace(/^_|_$/g, '');
-  return `${method.toLowerCase()}_${normalized || 'root'}`;
-}
-
-function methodToSideEffect(method: string): SideEffectClass {
-  if (['get', 'head', 'options'].includes(method.toLowerCase())) return 'safe';
-  return 'mutating';
-}
+import { toolId, pathToToolName, methodToSideEffect } from '../common.js';
 
 type RouteCall = {
   method: string;

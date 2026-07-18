@@ -1,7 +1,7 @@
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { resolve, dirname, relative } from 'node:path';
-import { createHash } from 'node:crypto';
-import type { RawToolMeta, JsonSchema2020, SideEffectClass } from '../../types.js';
+import type { RawToolMeta, JsonSchema2020 } from '../../types.js';
+import { toolId, pathToToolName, methodToSideEffect } from '../common.js';
 
 type RouteEntry = {
   method: string;
@@ -10,24 +10,6 @@ type RouteEntry = {
   sourceFile: string;
   sourceLine: number;
 };
-
-function toolId(method: string, path: string): string {
-  return createHash('sha1').update(`${method}:${path}`).digest('hex').slice(0, 12);
-}
-
-function pathToToolName(method: string, path: string): string {
-  const normalized = path
-    .replace(/^\//, '')
-    .replace(/[/<>:]/g, '_')
-    .replace(/_+/g, '_')
-    .replace(/^_|_$/g, '');
-  return `${method.toLowerCase()}_${normalized || 'root'}`;
-}
-
-function methodToSideEffect(method: string): SideEffectClass {
-  if (['GET', 'HEAD', 'OPTIONS'].includes(method)) return 'safe';
-  return 'mutating';
-}
 
 function normalizeDjangoPath(urlPattern: string): string {
   return urlPattern
