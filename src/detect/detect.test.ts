@@ -17,6 +17,13 @@ describe('stack detection', () => {
     expect(detectStack(resolve(FIXTURES, 'fastify-app'))).toBe('fastify');
   });
 
+  it('detects nestjs for nestjs-app fixture (not express/fastify)', () => {
+    // Nest keys on @nestjs/core + a @Controller/@nestjs/common source signal.
+    // The fixture has neither `express` nor `fastify` as a direct dep, and its
+    // main.ts uses `app.listen` (not `app.get`), so it can't false-positive.
+    expect(detectStack(resolve(FIXTURES, 'nestjs-app'))).toBe('nestjs');
+  });
+
   it('detects fastapi for fastapi-app fixture (has openapi.json but fastapi in requirements)', () => {
     // fastapi-app has both openapi.json and requirements.txt with fastapi
     // Stack detection order: nextjs > django > express > fastapi > openapi

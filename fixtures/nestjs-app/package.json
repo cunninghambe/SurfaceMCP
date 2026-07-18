@@ -1,0 +1,11 @@
+{
+  "name": "nestjs-app-fixture",
+  "private": true,
+  "dependencies": {
+    "@nestjs/core": "10.4.4",
+    "@nestjs/common": "10.4.4",
+    "@nestjs/platform-express": "10.4.4",
+    "class-validator": "0.14.1",
+    "reflect-metadata": "0.2.2"
+  }
+}

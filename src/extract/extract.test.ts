@@ -3,6 +3,7 @@ import { extractNextjsRoutes } from './nextjs/routes.js';
 import { extractServerActions } from './nextjs/server-actions.js';
 import { extractExpressRoutes } from './express/static.js';
 import { extractFastifyRoutes } from './fastify/routes.js';
+import { extractNestjsRoutes } from './nestjs/routes.js';
 import { extractDjangoRoutes } from './django/ast-walk.js';
 import { extractOpenApiRoutes } from './openapi/parse.js';
 import { extractPagesForStack } from './pages/index.js';
@@ -181,6 +182,36 @@ describe('fastify route extraction', () => {
     expect(put!.inputSchemaConfidence).toBe('introspected');
     expect(del!.inputSchemaConfidence).toBe('unknown');
     expect(user!.inputSchemaConfidence).toBe('unknown');
+  });
+});
+
+describe('nestjs route extraction', () => {
+  it('discovers all must-discover routes', () => {
+    const root = resolve(FIXTURES, 'nestjs-app');
+    const tools = extractNestjsRoutes(root);
+    const must = loadMustDiscover('nestjs-app');
+    const discovered = new Set(tools.map(routeKey));
+
+    for (const route of must.routes ?? []) {
+      expect(discovered.has(route), `Missing route: ${route}`).toBe(true);
+    }
+  });
+
+  it('introspects @Body() (POST/PUT) and @Query() (GET) DTOs; unknown otherwise', () => {
+    const root = resolve(FIXTURES, 'nestjs-app');
+    const tools = extractNestjsRoutes(root);
+    const post   = tools.find(t => t.method === 'POST'   && t.path === '/items');
+    const put    = tools.find(t => t.method === 'PUT'    && t.path === '/items/:id');
+    const search = tools.find(t => t.method === 'GET'    && t.path === '/items/search');
+    const del    = tools.find(t => t.method === 'DELETE' && t.path === '/items/:id');
+    const list   = tools.find(t => t.method === 'GET'    && t.path === '/items');
+    expect(post!.inputSchemaConfidence).toBe('introspected');
+    expect(post!.inputSchema.properties?.price).toEqual({ type: 'integer' });
+    expect(put!.inputSchemaConfidence).toBe('introspected');
+    expect(search!.inputSchemaConfidence).toBe('introspected');
+    expect(search!.inputSchema.properties?.limit).toEqual({ type: 'integer' });
+    expect(del!.inputSchemaConfidence).toBe('unknown');
+    expect(list!.inputSchemaConfidence).toBe('unknown');
   });
 });
 

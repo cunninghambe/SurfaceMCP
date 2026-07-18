@@ -1,0 +1,13 @@
+{
+  "routes": [
+    "GET /items",
+    "GET /items/search",
+    "GET /items/:id",
+    "POST /items",
+    "PUT /items/:id",
+    "DELETE /items/:id",
+    "GET /health",
+    "GET /ping",
+    "POST /ping"
+  ]
+}
