@@ -140,7 +140,9 @@ describe('resolveRoutesForPage — path-traversal guard preserved', () => {
   it('rejects an absolute file-path input as bad_path', () => {
     const result = resolveRoutesForPage({
       root: VITE_APP,
-      pagePath: 'C:/Windows/System32/drivers/etc/hosts',
+      // Leading-slash path: absolute on both POSIX and Windows (a `C:\` path is
+      // only absolute on Windows, so it would slip through as relative on Linux).
+      pagePath: '/etc/passwd',
       pages: [],
       tools: [],
     });
