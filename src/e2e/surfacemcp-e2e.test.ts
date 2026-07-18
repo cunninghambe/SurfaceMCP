@@ -82,6 +82,23 @@ describe('SurfaceMCP e2e against fixtures/vite-app', () => {
     const tools = await server.listTools();
     expect(tools).toEqual([]);
   });
+
+  it('surface_routes_for_page resolves an SPA route via the page catalog (issue #24)', async () => {
+    // Regression: an SPA route path used to hit the path guard / filesystem and
+    // return bad_path/not_found. It must now resolve through the page catalog.
+    const result = await server.callTool('surface_routes_for_page', {
+      pagePath: '/admin/users',
+    }) as {
+      resolvedVia: string;
+      page?: { route: string; sourceFile: string; componentName?: string };
+      tools: unknown[];
+    };
+    expect(result.resolvedVia).toBe('route');
+    expect(result.page?.route).toBe('/admin/users');
+    expect(result.page?.sourceFile).toBe('src/pages/AdminUsers.tsx');
+    // No API tools in the pure-frontend vite fixture, but the route resolves.
+    expect(result.tools).toEqual([]);
+  });
 });
 
 describe('SurfaceMCP e2e against fixtures/nextjs-app', () => {
