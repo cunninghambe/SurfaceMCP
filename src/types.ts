@@ -30,6 +30,33 @@ export type InputSchemaConfidence = 'introspected' | 'inferred' | 'partial' | 'u
 export type SideEffectClass = 'safe' | 'mutating' | 'external';
 
 /**
+ * Descriptor for a GraphQL-backed tool. Present only on tools extracted from a
+ * GraphQL SDL schema; absent (`undefined`) on every REST tool. A GraphQL API
+ * exposes a single HTTP endpoint and encodes the operation in the request body,
+ * so this carries everything `executeCall` needs to synthesize a valid
+ * `{ query, variables }` POST body at call time.
+ */
+export type GraphQLToolDescriptor = {
+  /** Root type the field lives on. Query → `safe`; Mutation → `mutating`. */
+  operationType: 'query' | 'mutation';
+  /** The root field name, e.g. `user` for `type Query { user(id: ID!): User }`. */
+  field: string;
+  /**
+   * Field arguments in declaration order, each with its SDL type string (e.g.
+   * `ID!`, `[String!]`, `NewUserInput!`) so a valid GraphQL variable declaration
+   * can be generated. The bare arg names are `args.map(a => a.name)`.
+   */
+  args: Array<{ name: string; gqlType: string }>;
+  /**
+   * Shallow selection set for the return object type: space-separated scalar/enum
+   * leaf field names, e.g. `id name email`. Absent when the field returns a
+   * scalar/enum (those take no selection set). Falls back to `__typename` when an
+   * object return type exposes no scalar leaf fields one level deep.
+   */
+  selection?: string;
+};
+
+/**
  * Raw tool metadata as produced by per-stack extractors.
  * Does not include surface-level fields populated by tools-meta.
  */
@@ -46,6 +73,8 @@ export type RawToolMeta = {
   sourceLine: number;
   sourceFunctionName?: string;
   isServerAction: boolean;
+  /** Present only on GraphQL tools; see GraphQLToolDescriptor. Optional so REST tools are unaffected. */
+  graphql?: GraphQLToolDescriptor;
 };
 
 export type ToolMeta = RawToolMeta & {
@@ -62,7 +91,7 @@ export type ToolCatalog = {
   tools: ToolMeta[];
 };
 
-export type Stack = 'nextjs' | 'express' | 'fastify' | 'nestjs' | 'fastapi' | 'django' | 'openapi' | 'vite';
+export type Stack = 'nextjs' | 'express' | 'fastify' | 'nestjs' | 'fastapi' | 'django' | 'openapi' | 'vite' | 'graphql';
 
 export type PageSource = 'static' | 'crawl_seed';
 
@@ -245,6 +274,11 @@ export type SurfaceConfig = {
   root: string;
   baseUrl: string;
   port: number;
+  /**
+   * GraphQL endpoint path for the `graphql` stack. Every GraphQL tool posts here.
+   * Defaults to `/graphql` when unset. Ignored by all other stacks.
+   */
+  graphqlPath?: string;
   launchDevCommand?: string;
   watchPaths?: string[];
   watchIgnore?: string[];

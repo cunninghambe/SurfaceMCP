@@ -19,6 +19,7 @@ Working implementation, **v0.3.1**. Multi-surface, role-aware, with unit + e2e t
 - **FastAPI** (via the app's generated `openapi.json`)
 - **Django** (URLconf walk)
 - **Vite SPA** (client-side route + navigation discovery, crawl-seed fallback)
+- **GraphQL** (schema-first SDL: one tool per top-level Query/Mutation field, args → `inputSchema`, return type → `outputSchema`, callable via `{ query, variables }`)
 - **Generic OpenAPI** fallback (any framework that emits `openapi.json`/`yaml`)
 
 ## Install

@@ -7,6 +7,7 @@ import { isFastify } from './fastify.js';
 import { isNestjs } from './nestjs.js';
 import { isFastApi } from './fastapi.js';
 import { isOpenApi } from './openapi.js';
+import { isGraphql } from './graphql.js';
 
 /**
  * Detect the stack for a given directory. First match wins per spec § 3.3.
@@ -20,6 +21,7 @@ export function detectStack(root: string): Stack | null {
   if (isExpress(root)) return 'express';
   if (isFastify(root)) return 'fastify'; // after express — both use .get/.post, keyed on the fastify dep
   if (isFastApi(root)) return 'fastapi';
+  if (isGraphql(root)) return 'graphql'; // schema-first SDL; after frameworks so client-side .graphql docs don't win
   if (isOpenApi(root)) return 'openapi';
   return null;
 }

@@ -95,6 +95,7 @@ function defaultLaunchCommand(stack: string): string | undefined {
     nestjs: 'npm run start:dev',
     fastapi: 'uvicorn main:app --reload',
     django: 'python manage.py runserver',
+    graphql: 'npm run dev',
   };
   return cmds[stack];
 }
@@ -109,6 +110,7 @@ function defaultBaseUrl(stack: string): string {
     fastapi: 'http://localhost:8000',
     django: 'http://localhost:8000',
     openapi: 'http://localhost:3000',
+    graphql: 'http://localhost:4000',
   };
   return urls[stack] ?? 'http://localhost:3000';
 }
@@ -123,6 +125,7 @@ function defaultWatchPaths(stack: string): string[] {
     fastapi: ['.'],
     django: ['.'],
     openapi: ['.'],
+    graphql: ['.', 'src'],
   };
   return paths[stack] ?? ['src'];
 }
@@ -181,7 +184,7 @@ export async function runInit(opts: InitOptions): Promise<void> {
     const detected = stackOverride ?? detectStack(projectRoot);
     if (!detected) {
       throw new Error(
-        'Could not detect stack. Use --stack=<nextjs|vite|express|fastify|nestjs|fastapi|django|openapi> to override.'
+        'Could not detect stack. Use --stack=<nextjs|vite|express|fastify|nestjs|fastapi|django|openapi|graphql> to override.'
       );
     }
     // Hint: Vite present but no recognized router — manual config needed
