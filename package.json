@@ -8,13 +8,13 @@
     "surfacemcp": "./dist/cli/main.js"
   },
   "scripts": {
-    "build": "node_modules/.bin/tsc && mkdir -p dist/runtime-enum && cp src/runtime-enum/*.runtime.js dist/runtime-enum/",
+    "build": "tsc && node scripts/copy-runtime-enum.mjs",
     "start": "node dist/server/http.js",
-    "dev": "node_modules/.bin/tsx watch src/server/http.ts",
-    "typecheck": "node_modules/.bin/tsc --noEmit",
-    "test": "node_modules/.bin/vitest run",
-    "test:watch": "node_modules/.bin/vitest",
-    "test:e2e": "npm run build && node_modules/.bin/vitest run --config vitest.e2e.config.ts"
+    "dev": "tsx watch src/server/http.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:e2e": "npm run build && vitest run --config vitest.e2e.config.ts"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "1.29.0",

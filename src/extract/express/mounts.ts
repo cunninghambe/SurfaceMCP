@@ -16,7 +16,7 @@
  */
 
 import { existsSync, statSync } from 'node:fs';
-import { resolve as nodeResolve, dirname } from 'node:path';
+import { resolve as nodeResolve, dirname, join } from 'node:path';
 import { Node, SyntaxKind, type CallExpression, type Project, type SourceFile } from 'ts-morph';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -141,11 +141,11 @@ export function resolvePath(fromFile: string, spec: string): string | null {
     `${base}.js`,
     `${base}.mjs`,
     `${base}.cjs`,
-    `${baseNoExt}/index.ts`,
-    `${base}/index.ts`,
-    `${base}/index.js`,
-    `${base}/index.mjs`,
-    `${base}/index.cjs`,
+    join(baseNoExt, 'index.ts'),
+    join(base, 'index.ts'),
+    join(base, 'index.js'),
+    join(base, 'index.mjs'),
+    join(base, 'index.cjs'),
   ];
 
   for (const c of candidates) {

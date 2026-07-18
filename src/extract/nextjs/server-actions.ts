@@ -89,7 +89,7 @@ function processFileForAB(
   project: Project,
   byKey: Map<string, ServerAction>,
 ): void {
-  const relFile = relative(root, filePath);
+  const relFile = relative(root, filePath).replace(/\\/g, '/'); // posix form: stable toolIds + sourceFile across OSes
   if (isApiPath(relFile)) return;
   const sf = project.getSourceFile(filePath);
   if (!sf) return;
@@ -110,7 +110,7 @@ function processFileForC(
   project: Project,
   byKey: Map<string, ServerAction>,
 ): void {
-  const relFile = relative(root, filePath);
+  const relFile = relative(root, filePath).replace(/\\/g, '/'); // posix form: stable toolIds + sourceFile across OSes
   if (isApiPath(relFile)) return;
   if (!/(?:page|layout)\.(ts|tsx|js|jsx)$/.test(relFile)) return;
   const sf = project.getSourceFile(filePath) as SourceFile | undefined;

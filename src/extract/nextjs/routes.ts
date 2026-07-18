@@ -145,7 +145,8 @@ export async function extractNextjsRoutes(
   const appApiFiles = walkDir(appApiDir);
   for (const file of appApiFiles) {
     // Only process route.ts files in App Router
-    if (!file.endsWith('/route.ts') && !file.endsWith('/route.js')) continue;
+    const posixFile = file.replace(/\\/g, '/'); // walkDir yields OS-native separators; match on posix
+    if (!posixFile.endsWith('/route.ts') && !posixFile.endsWith('/route.js')) continue;
     const apiPath = filePathToApiPath(file, appApiDir);
     const tools = await extractMethodsFromFile(file, apiPath, root, zodAlias);
     rawTools.push(...tools);
@@ -164,7 +165,8 @@ export async function extractNextjsRoutes(
   const srcAppApiDir = resolve(root, 'src', 'app', 'api');
   const srcAppApiFiles = walkDir(srcAppApiDir);
   for (const file of srcAppApiFiles) {
-    if (!file.endsWith('/route.ts') && !file.endsWith('/route.js')) continue;
+    const posixFile = file.replace(/\\/g, '/'); // walkDir yields OS-native separators; match on posix
+    if (!posixFile.endsWith('/route.ts') && !posixFile.endsWith('/route.js')) continue;
     const apiPath = filePathToApiPath(file, srcAppApiDir);
     const tools = await extractMethodsFromFile(file, apiPath, root, zodAlias);
     rawTools.push(...tools);
