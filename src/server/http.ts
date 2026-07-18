@@ -18,7 +18,7 @@ import { pathToFileURL } from 'node:url';
 import type { ToolMeta, ProbeResult, Config, SurfaceRegistry, SurfaceRuntime } from '../types.js';
 import { buildDescribeAuth } from '../auth/describe-auth.js';
 import { isLoopbackRemote } from './loopback.js';
-import { resolveContainedPath } from './path-guard.js';
+import { resolveRoutesForPage } from './routes-for-page.js';
 import { validateExtraCookie } from './cookie-guard.js';
 import {
   resolveTokenState,
@@ -472,53 +472,29 @@ function registerMetaTools(
   // surface_routes_for_page
   server.tool(
     'surface_routes_for_page',
-    'Find routes used by a specific page component (best-effort static scan).',
+    'Find API tools referenced by a page. Accepts either an SPA route path (e.g. "/admin/users", as returned by surface_list_pages) or a source-file path relative to the project root. Best-effort static scan.',
     {
-      pagePath: z.string().min(1).describe('Page file path relative to project root'),
+      pagePath: z
+        .string()
+        .min(1)
+        .describe('SPA route path (e.g. "/admin/users") or a source-file path relative to the project root'),
       surface: optSurface,
     },
     async (args) => {
       const rt = resolveRuntime(registry, args.surface);
       if ('error' in rt) return toolError('surface_required', rt.error);
 
-      // #path-traversal: confine pagePath to the resolved project root — reject
-      // absolute inputs and any `..` escape before touching the filesystem.
-      const guard = resolveContainedPath(rt.resolvedRoot, args.pagePath);
-      if (!guard.ok) return toolError(guard.code, guard.message);
-      const absPath = guard.absPath;
-
-      const { readFileSync, existsSync } = await import('node:fs');
-      if (!existsSync(absPath)) return toolError('not_found', `Page not found: ${args.pagePath}`);
-
-      let content = '';
-      try {
-        content = readFileSync(absPath, 'utf-8');
-      } catch {
-        return toolError('read_error', `Could not read page: ${args.pagePath}`);
-      }
-
-      const urlPattern = /(?:fetch|useSWR|useMutation|useQuery)\s*\(\s*['"`]([^'"` ]+)['"`]/g;
-      const matchedPaths = new Set<string>();
-      let match: RegExpExecArray | null;
-      while ((match = urlPattern.exec(content)) !== null) {
-        matchedPaths.add(match[1]);
-      }
-
-      const matchedTools = rt.catalog.tools.filter((t) => {
-        for (const p of matchedPaths) {
-          const normalized = p.replace(/\/:[^/]+/g, '/:param');
-          if (t.path === p || t.path === normalized) return true;
-        }
-        return false;
+      // Resolve SPA routes via the page catalog (same route table
+      // surface_list_pages exposes), falling back to treating pagePath as a
+      // source-file path. The path-traversal guard is applied inside.
+      const result = resolveRoutesForPage({
+        root: rt.resolvedRoot,
+        pagePath: args.pagePath,
+        pages: rt.pageCatalog.pages,
+        tools: rt.catalog.tools,
       });
-
-      return toolOk({
-        tools: matchedTools.map((t) => ({
-          toolId: t.toolId,
-          name: t.name,
-          sourceLocation: `${t.sourceFile}:${t.sourceLine}`,
-        })),
-      });
+      if (!result.ok) return toolError(result.code, result.message);
+      return toolOk(result.data);
     }
   );
 
