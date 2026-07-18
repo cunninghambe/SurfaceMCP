@@ -1,0 +1,25 @@
+{
+  "operations": [
+    {
+      "toolId": "affdded9d006",
+      "name": "query_users",
+      "operationType": "query",
+      "field": "users",
+      "sideEffectClass": "safe"
+    },
+    {
+      "toolId": "e0ab004db53d",
+      "name": "query_user",
+      "operationType": "query",
+      "field": "user",
+      "sideEffectClass": "safe"
+    },
+    {
+      "toolId": "012fa15afcec",
+      "name": "mutation_createUser",
+      "operationType": "mutation",
+      "field": "createUser",
+      "sideEffectClass": "mutating"
+    }
+  ]
+}

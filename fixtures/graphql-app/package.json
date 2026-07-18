@@ -1,0 +1,5 @@
+{
+  "name": "graphql-app-fixture",
+  "private": true,
+  "dependencies": { "graphql": "16.11.0" }
+}

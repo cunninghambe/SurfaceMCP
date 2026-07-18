@@ -36,6 +36,10 @@ describe('stack detection', () => {
     expect(detectStack(resolve(FIXTURES, 'django-app'))).toBe('django');
   });
 
+  it('detects graphql for graphql-app fixture (schema-first SDL with a root type)', () => {
+    expect(detectStack(resolve(FIXTURES, 'graphql-app'))).toBe('graphql');
+  });
+
   it('returns null for unknown directory', () => {
     expect(detectStack('/tmp')).toBeNull();
   });

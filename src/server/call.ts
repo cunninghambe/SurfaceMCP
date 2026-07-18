@@ -4,6 +4,7 @@ import { shouldAutoRelogin } from '../auth/refresh-policy.js';
 import { getApiKey } from '../auth/api-key.js';
 import { resolveCredentials } from '../env/indirection.js';
 import { substitutePathParams } from './path-params.js';
+import { buildGraphqlBody } from './graphql-request.js';
 import { log } from '../log.js';
 
 const BODY_MAX_BYTES = 64 * 1024; // 64 KB
@@ -231,7 +232,12 @@ export async function executeCall(params: CallParams): Promise<SurfaceCallResult
     let fetchBody: string | undefined;
     let fetchUrl = url;
 
-    if (['GET', 'HEAD', 'OPTIONS', 'DELETE'].includes(method)) {
+    if (params.tool.graphql) {
+      // GraphQL: the operation lives in the POST body as `{ query, variables }`, not
+      // in the URL. Always POST to the endpoint path; the caller's input is variables.
+      // Guarded strictly on `tool.graphql` so REST tools are unaffected.
+      fetchBody = buildGraphqlBody(params.tool.graphql, params.input);
+    } else if (['GET', 'HEAD', 'OPTIONS', 'DELETE'].includes(method)) {
       // Append query params for GET-like methods
       if (Object.keys(bodyInput).length > 0) {
         const qp = new URLSearchParams(

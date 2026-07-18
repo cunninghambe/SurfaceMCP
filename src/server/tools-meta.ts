@@ -8,15 +8,19 @@ import { extractNestjsRoutes } from '../extract/nestjs/routes.js';
 import { fetchFastApiSchema } from '../extract/fastapi/openapi-fetch.js';
 import { extractDjangoRoutes } from '../extract/django/ast-walk.js';
 import { extractOpenApiRoutes } from '../extract/openapi/parse.js';
+import { extractGraphqlSchema } from '../extract/graphql/parse.js';
 import { extractPagesForStack } from '../extract/pages/index.js';
 import { classifyByCallGraph } from '../classify/call-graph.js';
 import { log } from '../log.js';
 
-function prefixedToolId(surfaceName: string, method: string, path: string): string {
-  return createHash('sha1')
-    .update(`${surfaceName}:${method}:${path}`)
-    .digest('hex')
-    .slice(0, 12);
+function prefixedToolId(surfaceName: string, tool: RawToolMeta): string {
+  // GraphQL tools all share `POST <graphqlPath>`, so keying the surface-scoped id on
+  // method:path would collide every operation onto one id. Key on the operation
+  // instead (mirrors the raw operation-keyed id). REST tools keep method:path exactly.
+  const key = tool.graphql
+    ? `${surfaceName}:graphql:${tool.graphql.operationType}:${tool.graphql.field}`
+    : `${surfaceName}:${tool.method}:${tool.path}`;
+  return createHash('sha1').update(key).digest('hex').slice(0, 12);
 }
 
 function applyPrefix(raw: RawToolMeta[], surfaceName: string, multiSurface: boolean): ToolMeta[] {
@@ -25,7 +29,7 @@ function applyPrefix(raw: RawToolMeta[], surfaceName: string, multiSurface: bool
     bareName: tool.name,
     surface: surfaceName,
     name: multiSurface ? `${surfaceName}:${tool.name}` : tool.name,
-    toolId: prefixedToolId(surfaceName, tool.method, tool.path),
+    toolId: prefixedToolId(surfaceName, tool),
   }));
 }
 
@@ -54,6 +58,8 @@ async function extractRaw(surface: SurfaceConfig, root: string): Promise<RawTool
       return extractDjangoRoutes(root);
     case 'openapi':
       return extractOpenApiRoutes(root);
+    case 'graphql':
+      return extractGraphqlSchema(root, surface.graphqlPath ?? '/graphql');
     case 'vite':
       return [];
   }
@@ -79,7 +85,13 @@ export async function regenerateCatalog(
   const externalPaths = surface.externalIntegrations ?? [];
   raw = raw.map((tool) => ({
     ...tool,
-    sideEffectClass: classifyByCallGraph(tool.sourceFile, root, tool.method, externalPaths),
+    // GraphQL Query fields are `safe` and Mutation fields `mutating`, decided at
+    // extraction from the operation type. The call-graph classifier keys on the HTTP
+    // method — always POST for GraphQL — and would force every Query to `mutating`,
+    // so preserve the extractor's classification for GraphQL tools.
+    sideEffectClass: tool.graphql
+      ? tool.sideEffectClass
+      : classifyByCallGraph(tool.sourceFile, root, tool.method, externalPaths),
   }));
 
   // Filter excluded routes
