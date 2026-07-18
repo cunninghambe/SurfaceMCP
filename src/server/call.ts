@@ -246,6 +246,7 @@ export async function executeCall(params: CallParams): Promise<SurfaceCallResult
       response = await fetch(fetchUrl, {
         method,
         headers,
+        body: fetchBody,
         // #SSRF: never silently follow redirects — a 3xx to an attacker-controlled
         // host would let the target pivot our authenticated session elsewhere.
         // Surface the 3xx status + Location header to the caller instead.
