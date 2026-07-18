@@ -66,6 +66,16 @@ Invocation: `surface_call`, `surface_probe`, `surface_sample_inputs`.
 Auth: `surface_describe_auth`, `surface_login_status`, `surface_relogin`.
 Runtime route enumeration: `surface_enumerate_routes_runtime`, `surface_postprocess_runtime_routes`.
 
+### Call semantics
+
+`surface_call` takes `role` and a single `input` object. The generated tool
+advertises a **typed** input schema derived from the route's extracted schema
+(zod introspection / OpenAPI / probe), not an opaque bag. Path parameters
+(`:id`, `{id}`, `<int:pk>`) are substituted into the URL from `input` and then
+omitted from the query string / body; a missing path parameter is rejected with
+a typed `missing_path_param` error before any request is issued. See
+[SPEC_TYPED_CALL_SURFACE.md](SPEC_TYPED_CALL_SURFACE.md).
+
 ### `surface_list_navigations` v2
 
 For Vite SPA stacks, the navigation catalog includes richer hint fields on every entry. These are optional and backwards-compatible — consumers that ignore unknown fields are unaffected.
