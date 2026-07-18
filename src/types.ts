@@ -62,7 +62,7 @@ export type ToolCatalog = {
   tools: ToolMeta[];
 };
 
-export type Stack = 'nextjs' | 'express' | 'fastapi' | 'django' | 'openapi' | 'vite';
+export type Stack = 'nextjs' | 'express' | 'fastify' | 'fastapi' | 'django' | 'openapi' | 'vite';
 
 export type PageSource = 'static' | 'crawl_seed';
 

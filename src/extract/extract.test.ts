@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { extractNextjsRoutes } from './nextjs/routes.js';
 import { extractServerActions } from './nextjs/server-actions.js';
 import { extractExpressRoutes } from './express/static.js';
+import { extractFastifyRoutes } from './fastify/routes.js';
 import { extractDjangoRoutes } from './django/ast-walk.js';
 import { extractOpenApiRoutes } from './openapi/parse.js';
 import { extractPagesForStack } from './pages/index.js';
@@ -150,6 +151,36 @@ describe('express route extraction', () => {
     expect(post!.inputSchema.properties?.name).toBeDefined();
     expect(put!.inputSchemaConfidence).toBe('introspected');
     expect(del!.inputSchemaConfidence).toBe('unknown');
+  });
+});
+
+describe('fastify route extraction', () => {
+  it('discovers all must-discover routes', () => {
+    const root = resolve(FIXTURES, 'fastify-app');
+    const tools = extractFastifyRoutes(root);
+    const must = loadMustDiscover('fastify-app');
+    const discovered = new Set(tools.map(routeKey));
+
+    for (const route of must.routes ?? []) {
+      expect(discovered.has(route), `Missing route: ${route}`).toBe(true);
+    }
+  });
+
+  it('introspects querystring (GET) and body (POST/PUT) JSON schemas', () => {
+    const root = resolve(FIXTURES, 'fastify-app');
+    const tools = extractFastifyRoutes(root);
+    const get  = tools.find(t => t.method === 'GET'    && t.path === '/api/items');
+    const post = tools.find(t => t.method === 'POST'   && t.path === '/api/items');
+    const put  = tools.find(t => t.method === 'PUT'    && t.path === '/api/items/:id');
+    const del  = tools.find(t => t.method === 'DELETE' && t.path === '/api/items/:id');
+    const user = tools.find(t => t.method === 'GET'    && t.path === '/users/:id');
+    expect(get!.inputSchemaConfidence).toBe('introspected');
+    expect(get!.inputSchema.properties?.limit).toBeDefined();
+    expect(post!.inputSchemaConfidence).toBe('introspected');
+    expect(post!.inputSchema.properties?.name).toBeDefined();
+    expect(put!.inputSchemaConfidence).toBe('introspected');
+    expect(del!.inputSchemaConfidence).toBe('unknown');
+    expect(user!.inputSchemaConfidence).toBe('unknown');
   });
 });
 

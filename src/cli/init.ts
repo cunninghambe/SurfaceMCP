@@ -91,6 +91,7 @@ function defaultLaunchCommand(stack: string): string | undefined {
     nextjs: 'npm run dev',
     vite: 'npm run dev',
     express: 'npm run dev',
+    fastify: 'npm run dev',
     fastapi: 'uvicorn main:app --reload',
     django: 'python manage.py runserver',
   };
@@ -102,6 +103,7 @@ function defaultBaseUrl(stack: string): string {
     nextjs: 'http://localhost:3000',
     vite: 'http://localhost:5173',
     express: 'http://localhost:3001',
+    fastify: 'http://localhost:3000',
     fastapi: 'http://localhost:8000',
     django: 'http://localhost:8000',
     openapi: 'http://localhost:3000',
@@ -114,6 +116,7 @@ function defaultWatchPaths(stack: string): string[] {
     nextjs: ['app', 'pages', 'src'],
     vite: ['src'],
     express: ['src', '.'],
+    fastify: ['src', '.'],
     fastapi: ['.'],
     django: ['.'],
     openapi: ['.'],
@@ -175,7 +178,7 @@ export async function runInit(opts: InitOptions): Promise<void> {
     const detected = stackOverride ?? detectStack(projectRoot);
     if (!detected) {
       throw new Error(
-        'Could not detect stack. Use --stack=<nextjs|vite|express|fastapi|django|openapi> to override.'
+        'Could not detect stack. Use --stack=<nextjs|vite|express|fastify|fastapi|django|openapi> to override.'
       );
     }
     // Hint: Vite present but no recognized router — manual config needed

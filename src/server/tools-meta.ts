@@ -3,6 +3,7 @@ import type { RawToolMeta, ToolMeta, ToolCatalog, PageCatalog, SurfaceRuntime, S
 import { extractNextjsRoutes } from '../extract/nextjs/routes.js';
 import { extractServerActions } from '../extract/nextjs/server-actions.js';
 import { extractExpressRoutes } from '../extract/express/static.js';
+import { extractFastifyRoutes } from '../extract/fastify/routes.js';
 import { fetchFastApiSchema } from '../extract/fastapi/openapi-fetch.js';
 import { extractDjangoRoutes } from '../extract/django/ast-walk.js';
 import { extractOpenApiRoutes } from '../extract/openapi/parse.js';
@@ -42,6 +43,8 @@ async function extractRaw(surface: SurfaceConfig, root: string): Promise<RawTool
         surface.schemaIntrospection?.zodAlias,
         surface.schemaIntrospection?.bodyValidatorNames
       );
+    case 'fastify':
+      return extractFastifyRoutes(root);
     case 'fastapi':
       return fetchFastApiSchema(surface.baseUrl, root);
     case 'django':
