@@ -125,7 +125,7 @@ Commands:
   schema        Print the JSON Schema for surfacemcp.config.json
 
 Options:
-  --stack=<nextjs|express|fastapi|django|openapi>
+  --stack=<nextjs|express|fastify|fastapi|django|openapi>
   --base-url=<url>
   --project-root=<path>
   --multi-surface

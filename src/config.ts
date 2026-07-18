@@ -81,7 +81,7 @@ const SurfaceConfigSchema = z.object({
       message:
         'Surface name must contain only [a-zA-Z0-9_-]. Reserved characters ":" and "." are not allowed because they are used in tool naming.',
     }),
-  stack: z.enum(['nextjs', 'express', 'fastapi', 'django', 'openapi', 'vite']),
+  stack: z.enum(['nextjs', 'express', 'fastify', 'fastapi', 'django', 'openapi', 'vite']),
   root: z.string(),
   baseUrl: z.string().url(),
   port: z.number().int().min(3102).max(3199),

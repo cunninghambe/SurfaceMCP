@@ -13,6 +13,10 @@ describe('stack detection', () => {
     expect(detectStack(resolve(FIXTURES, 'express-app'))).toBe('express');
   });
 
+  it('detects fastify for fastify-app fixture', () => {
+    expect(detectStack(resolve(FIXTURES, 'fastify-app'))).toBe('fastify');
+  });
+
   it('detects fastapi for fastapi-app fixture (has openapi.json but fastapi in requirements)', () => {
     // fastapi-app has both openapi.json and requirements.txt with fastapi
     // Stack detection order: nextjs > django > express > fastapi > openapi

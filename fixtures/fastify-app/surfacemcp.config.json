@@ -1,0 +1,26 @@
+{
+  "surfaces": [
+    {
+      "name": "api",
+      "stack": "fastify",
+      "root": ".",
+      "baseUrl": "http://127.0.0.1:3000",
+      "port": 3102,
+      "launchDevCommand": "npm run dev",
+      "watchPaths": [
+        "src",
+        "."
+      ],
+      "watchIgnore": [],
+      "auth": {
+        "kind": "none"
+      },
+      "roles": [
+        { "name": "anonymous", "credentials": {} }
+      ],
+      "excludedRoutes": [],
+      "externalIntegrations": [],
+      "_suggestedExternalIntegrations": []
+    }
+  ]
+}

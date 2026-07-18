@@ -14,6 +14,7 @@ Working implementation, **v0.3.1**. Multi-surface, role-aware, with unit + e2e t
 
 - **Next.js** (App Router `app/api/**/route.ts` and Pages Router `pages/api/**`, plus server actions)
 - **Express** (route + mounted-router discovery)
+- **Fastify** (shorthand + `route({})` discovery, with inline JSON Schema introspection)
 - **FastAPI** (via the app's generated `openapi.json`)
 - **Django** (URLconf walk)
 - **Vite SPA** (client-side route + navigation discovery, crawl-seed fallback)
