@@ -1,4 +1,4 @@
-import { loadConfig, findConfigPath } from '../config.js';
+import { loadConfig, findConfigPath, findLiteralCredentialPaths } from '../config.js';
 import { loadEnvFiles } from '../env/indirection.js';
 import { RoleMutex } from '../auth/role-mutex.js';
 import { regenerateCatalogForSurface, getCatalog } from '../server/tools-meta.js';
@@ -20,6 +20,16 @@ export async function runDoctor(opts: DoctorOptions): Promise<void> {
   } catch (err) {
     console.error(`Config: FAIL — ${String(err)}`);
     process.exit(1);
+  }
+
+  // Warn on inline literal credentials — secrets belong in a gitignored env file.
+  const literalCreds = findLiteralCredentialPaths(config);
+  if (literalCreds.length > 0) {
+    console.warn(
+      `\nWARN: ${literalCreds.length} credential value(s) are inline literals, not $env: indirection:`
+    );
+    for (const p of literalCreds) console.warn(`  - ${p}`);
+    console.warn('Move secrets to a gitignored .env.local and reference them as $env:VAR.');
   }
 
   const surface = config.surfaces[0]!;

@@ -94,7 +94,16 @@ The catalog is sorted by quality: confidence desc, siblingNavigations asc, prefe
 
 ## Security model
 
-The MCP endpoint binds to `127.0.0.1` and proxies calls to the configured `baseUrl` only — tool arguments never choose the target host. Credentials are read from a gitignored env file and are never logged. Note that the loopback endpoint currently has no per-caller auth token; treat any process that can reach the port as trusted. See [SPEC.md](SPEC.md) for the full threat model.
+The MCP endpoint binds to `127.0.0.1` and proxies calls to the configured `baseUrl` only — tool arguments never choose the target host. Credentials are read from a gitignored env file and are never logged.
+
+`POST /mcp` is protected by two layers (see [SPEC_SECURITY_HARDENING.md](SPEC_SECURITY_HARDENING.md)):
+
+- **DNS-rebinding protection.** The `Host` header must be a loopback authority the server actually listens on (`127.0.0.1:<port>` / `localhost:<port>` / `[::1]:<port>`), and any request carrying an `Origin` header (i.e. a browser cross-context `fetch`) is rejected. This blocks a malicious web page from driving the endpoint via a rebound hostname.
+- **Per-caller bearer token (default ON).** Callers must send `Authorization: Bearer <token>`, compared in constant time. Set `SURFACEMCP_TOKEN` to pin the secret; if unset, a random token is generated and logged **once** at startup. For trusted local dev only, set `SURFACEMCP_AUTH_DISABLED=1` to turn the token gate off (DNS-rebinding protection stays on). The `/health` readiness endpoint is not gated.
+
+Credential values are **redacted by default**: `surface_describe_auth` returns field names and per-field shape metadata only. Pass `revealSecrets: true` (loopback + token gated) to include plaintext. `surface_call` does not follow redirects (no SSRF pivot), never returns the target's `set-cookie`, and validates any caller-supplied `extraCookie`; `surface_routes_for_page` confines file reads to the project root. Inline literal credentials (values not using `$env:` indirection) are flagged by `surfacemcp doctor` and at config load.
+
+See [SPEC.md](SPEC.md) for the base threat model and [SPEC_SECURITY_HARDENING.md](SPEC_SECURITY_HARDENING.md) for this hardening pass.
 
 ## Development
 

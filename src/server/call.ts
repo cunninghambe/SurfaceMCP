@@ -81,6 +81,20 @@ function buildHeaders(
   return headers;
 }
 
+/**
+ * #leak: drop `set-cookie` from headers returned to the caller so a freshly
+ * minted target session is never handed back over the MCP wire. The auth-refresh
+ * decision that needs `set-cookie` runs before this strip is applied.
+ */
+function stripSetCookie(headers: Record<string, string>): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const [k, v] of Object.entries(headers)) {
+    if (k.toLowerCase() === 'set-cookie') continue;
+    out[k] = v;
+  }
+  return out;
+}
+
 async function readBodyWithLimit(
   res: Response,
   timeoutMs: number
@@ -233,7 +247,10 @@ export async function executeCall(params: CallParams): Promise<SurfaceCallResult
         method,
         headers,
         body: fetchBody,
-        redirect: 'follow',
+        // #SSRF: never silently follow redirects — a 3xx to an attacker-controlled
+        // host would let the target pivot our authenticated session elsewhere.
+        // Surface the 3xx status + Location header to the caller instead.
+        redirect: 'manual',
         signal: AbortSignal.timeout(timeoutMs),
       });
     } catch (err) {
@@ -263,9 +280,10 @@ export async function executeCall(params: CallParams): Promise<SurfaceCallResult
     };
   };
 
-  const result = await makeRequest(session);
+  let result = await makeRequest(session);
 
-  // Auto-relogin check
+  // Auto-relogin check. This reads result.headers['set-cookie'], so it must run
+  // BEFORE we strip set-cookie from the caller-facing headers below.
   if (
     !params.noAutoRelogin &&
     result.status !== undefined &&
@@ -280,15 +298,20 @@ export async function executeCall(params: CallParams): Promise<SurfaceCallResult
       log.info({ role: params.role, status: result.status }, 'auto-relogin triggered');
       try {
         session = await params.roleMutex.refresh(params.role);
-        return makeRequest(session);
+        result = await makeRequest(session);
       } catch (err) {
-        return {
+        result = {
           ...result,
           ok: false,
           error: { code: 'relogin_failed', message: String(err) },
         };
       }
     }
+  }
+
+  // #leak: never return the target's Set-Cookie to the caller.
+  if (result.headers !== undefined) {
+    result = { ...result, headers: stripSetCookie(result.headers) };
   }
 
   return result;

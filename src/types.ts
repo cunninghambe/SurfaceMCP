@@ -172,6 +172,24 @@ export type AuthConfig =
   | { kind: 'bearer' }
   | { kind: 'api_key'; header?: string; query?: string };
 
+/**
+ * Non-secret shape metadata for a single credential field. Reports whether a
+ * value is present, its length, and where it comes from — never the value itself.
+ */
+export type CredentialFieldMeta = {
+  /** True when a non-empty resolved value exists. */
+  present: boolean;
+  /** Character length of the resolved value (0 when missing/empty). */
+  length: number;
+  /**
+   * Provenance of the raw config value:
+   * - 'env': sourced via `$env:VAR` indirection.
+   * - 'literal': an inline literal in the config (discouraged).
+   * - 'missing': the credential key is absent from the role's credentials.
+   */
+  source: 'env' | 'literal' | 'missing';
+};
+
 export type DescribeAuthResult =
   | { authKind: 'none'; reason: 'no_auth_configured' }
   | { authKind: 'bearer'; reason: 'programmatic_only'; detail: string }
@@ -183,7 +201,12 @@ export type DescribeAuthResult =
       uiTriggerSelector?: string;
       uiSubmitSelector?: string;
       fields: Record<string, string>;
-      values: Record<string, string>;
+      /** Per-field shape metadata, keyed by domFieldName. Always present (never secret). */
+      valueMeta: Record<string, CredentialFieldMeta>;
+      /** Plaintext values keyed by domFieldName. Present ONLY when revealSecrets was requested. */
+      values?: Record<string, string>;
+      /** True when credential values are omitted (the default). */
+      redacted: boolean;
       successCheck: SuccessCheck;
       cookieName?: string;
     }
@@ -193,7 +216,12 @@ export type DescribeAuthResult =
       uiTriggerSelector?: string;
       uiSubmitSelector?: string;
       fields: Record<string, string>;
-      values: Record<string, string>;
+      /** Per-field shape metadata, keyed by domFieldName. Always present (never secret). */
+      valueMeta: Record<string, CredentialFieldMeta>;
+      /** Plaintext values keyed by domFieldName. Present ONLY when revealSecrets was requested. */
+      values?: Record<string, string>;
+      /** True when credential values are omitted (the default). */
+      redacted: boolean;
       successCheck: SuccessCheck;
       cookieName: string;
     };
