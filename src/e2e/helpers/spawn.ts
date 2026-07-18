@@ -1,7 +1,23 @@
 import { spawn, type ChildProcess } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
+import { dirname, resolve as resolvePath } from 'node:path';
 import { getFreePort } from './free-port.js';
 import { detectExternalIntegrations } from '../../classify/grep-init.js';
 import type { ToolMeta, Page } from '../../types.js';
+
+// Resolve the built CLI relative to this file so e2e works on any machine/CI,
+// not just the original author's box. This file lives at either src/e2e/helpers
+// (vitest runs TS) or dist/e2e/helpers (compiled); three levels up is the repo
+// root in both cases, and the spawned server always needs the built dist/ entry.
+const CLI_ENTRY = resolvePath(
+  dirname(fileURLToPath(import.meta.url)),
+  '..',
+  '..',
+  '..',
+  'dist',
+  'cli',
+  'main.js',
+);
 
 export type SpawnedServer = {
   baseUrl: string;
@@ -107,7 +123,7 @@ export async function startSurfaceMcpServer(cwd: string): Promise<SpawnedServer>
 
   const proc = spawn(
     'node',
-    ['/root/SurfaceMCP/dist/cli/main.js', 'serve', '--project-root', cwd, '--config', tmpConfig],
+    [CLI_ENTRY, 'serve', '--project-root', cwd, '--config', tmpConfig],
     {
       cwd,
       env: { ...process.env, SURFACEMCP_CONFIG: tmpConfig },

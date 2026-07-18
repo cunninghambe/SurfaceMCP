@@ -60,10 +60,18 @@ export async function runServe(opts: ServeOptions): Promise<void> {
 
   const port = getMcpPort(config);
   const app = await createApp(config, projectRoot);
-  app.listen(port, '127.0.0.1', () => {
+  const server = app.listen(port, '127.0.0.1', () => {
     log.info(
       { port, endpoint: `http://127.0.0.1:${port}/mcp`, surfaces: config.surfaces.map((s) => s.name) },
       'SurfaceMCP listening'
     );
+  });
+  server.on('error', (err: NodeJS.ErrnoException) => {
+    if (err.code === 'EADDRINUSE') {
+      log.error({ port }, `Port ${port} is already in use — another SurfaceMCP instance may be running`);
+    } else {
+      log.error({ err }, 'HTTP server error');
+    }
+    process.exit(1);
   });
 }
