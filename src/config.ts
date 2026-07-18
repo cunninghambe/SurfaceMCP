@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { zodToJsonSchema } from 'zod-to-json-schema';
 import { readFileSync, existsSync } from 'node:fs';
 import { resolve } from 'node:path';
 import type { Config } from './types.js';
@@ -93,6 +94,10 @@ const SurfaceConfigSchema = z.object({
     .object({
       zodAlias: z.string().optional(),
       pydanticBaseClass: z.string().optional(),
+      // Express body-validator function names to treat as schema sources. Was
+      // present in the TS type + consumed at tools-meta, but missing here, so
+      // .parse() silently dropped it. Keep in sync with SurfaceConfig in types.ts.
+      bodyValidatorNames: z.array(z.string()).optional(),
     })
     .optional(),
   excludedRoutes: z.array(z.string()).optional(),
@@ -137,6 +142,18 @@ export function findLiteralCredentialPaths(config: Config): string[] {
     });
   });
   return paths;
+}
+
+/**
+ * JSON Schema (Draft 2020-12) for `surfacemcp.config.json`, generated from the
+ * Zod schema so it can never drift. Emit it with `surfacemcp schema` and add a
+ * `"$schema"` reference to your config for editor autocomplete + validation.
+ */
+export function configJsonSchema(): Record<string, unknown> {
+  return zodToJsonSchema(ConfigSchema, {
+    name: 'SurfaceMcpConfig',
+    $refStrategy: 'none',
+  }) as Record<string, unknown>;
 }
 
 export function loadConfig(configPath: string): Config {

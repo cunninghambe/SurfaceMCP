@@ -121,12 +121,22 @@ async function readBodyWithLimit(
         break;
       }
 
-      const readPromise = reader.read();
-      const timeoutPromise = new Promise<{ done: true; value: undefined }>((resolve) => {
-        setTimeout(() => resolve({ done: true, value: undefined }), remaining);
+      // Race the read against a deadline. Use a distinct 'timeout' sentinel (not a
+      // fabricated {done:true}) so a timed-out read is reported as truncated, not
+      // as a complete body — and clear the timer each iteration so it can't leak
+      // or keep the event loop alive after the chunk arrives.
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const timeoutPromise = new Promise<'timeout'>((resolve) => {
+        timer = setTimeout(() => resolve('timeout'), remaining);
       });
+      const result = await Promise.race([reader.read(), timeoutPromise]);
+      clearTimeout(timer);
 
-      const result = await Promise.race([readPromise, timeoutPromise]);
+      if (result === 'timeout') {
+        truncated = true;
+        reader.cancel().catch(() => {});
+        break;
+      }
       if (result.done) break;
 
       const chunk = result.value;

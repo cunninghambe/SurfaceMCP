@@ -1,20 +1,47 @@
 {
   "name": "surfacemcp",
   "version": "0.3.1",
-  "private": true,
   "description": "HTTP MCP server exposing a typed, introspectable, role-aware API surface for any target app",
   "type": "module",
+  "license": "MIT",
+  "author": "cunninghambe",
+  "homepage": "https://github.com/cunninghambe/SurfaceMCP#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/cunninghambe/SurfaceMCP.git"
+  },
+  "bugs": {
+    "url": "https://github.com/cunninghambe/SurfaceMCP/issues"
+  },
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "api",
+    "openapi",
+    "nextjs",
+    "express",
+    "fastapi",
+    "django",
+    "testing",
+    "agents"
+  ],
   "bin": {
     "surfacemcp": "./dist/cli/main.js"
   },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
   "scripts": {
-    "build": "tsc && node scripts/copy-runtime-enum.mjs",
+    "build": "tsc -p tsconfig.build.json && node scripts/copy-runtime-enum.mjs",
     "start": "node dist/server/http.js",
     "dev": "tsx watch src/server/http.ts",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:e2e": "npm run build && vitest run --config vitest.e2e.config.ts"
+    "test:e2e": "npm run build && vitest run --config vitest.e2e.config.ts",
+    "prepublishOnly": "npm run build && npm run typecheck && npm test"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "1.29.0",
