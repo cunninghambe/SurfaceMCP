@@ -19,6 +19,11 @@ const CLI_ENTRY = resolvePath(
   'main.js',
 );
 
+// The /mcp endpoint is token-gated (SPEC_SECURITY_HARDENING). The helper pins a
+// fixed token via SURFACEMCP_TOKEN on the spawned process and presents it as a
+// bearer token on every MCP call. The /health readiness probe is not gated.
+const E2E_TOKEN = 'e2e-surfacemcp-token';
+
 export type SpawnedServer = {
   baseUrl: string;
   port: number;
@@ -54,6 +59,7 @@ async function mcpCall<T>(baseUrl: string, tool: string, args: unknown): Promise
     headers: {
       'Content-Type': 'application/json',
       Accept: 'application/json, text/event-stream',
+      Authorization: `Bearer ${E2E_TOKEN}`,
     },
     body: JSON.stringify(body),
   });
@@ -126,7 +132,7 @@ export async function startSurfaceMcpServer(cwd: string): Promise<SpawnedServer>
     [CLI_ENTRY, 'serve', '--project-root', cwd, '--config', tmpConfig],
     {
       cwd,
-      env: { ...process.env, SURFACEMCP_CONFIG: tmpConfig },
+      env: { ...process.env, SURFACEMCP_CONFIG: tmpConfig, SURFACEMCP_TOKEN: E2E_TOKEN },
       stdio: ['ignore', 'pipe', 'pipe'],
     }
   );

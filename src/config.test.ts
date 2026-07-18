@@ -1,5 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { z } from 'zod';
+import { findLiteralCredentialPaths } from './config.js';
+import type { Config } from './types.js';
 
 // Re-export config internals for testing by re-parsing via loadConfig
 // We test the schema directly by replicating the relevant Zod shape.
@@ -118,5 +120,38 @@ describe('ConfigSchema — multi-surface', () => {
     const cfg = { surfaces: [makeSurface('api')], mcpPort: 80 };
     const result = ConfigSchema.safeParse(cfg);
     expect(result.success).toBe(false);
+  });
+});
+
+describe('findLiteralCredentialPaths', () => {
+  function cfgWithRoles(roles: Array<{ name: string; credentials?: Record<string, string> }>): Config {
+    return {
+      surfaces: [
+        {
+          name: 'api',
+          stack: 'openapi',
+          root: '.',
+          baseUrl: 'http://localhost:5000',
+          port: 3140,
+          auth: { kind: 'none' },
+          roles,
+        },
+      ],
+    } as Config;
+  }
+
+  it('returns nothing when all credentials use $env: indirection', () => {
+    const cfg = cfgWithRoles([{ name: 'owner', credentials: { email: '$env:EMAIL', password: '$env:PW' } }]);
+    expect(findLiteralCredentialPaths(cfg)).toEqual([]);
+  });
+
+  it('flags inline literal credential values with a readable path', () => {
+    const cfg = cfgWithRoles([{ name: 'owner', credentials: { email: '$env:EMAIL', password: 'hunter2' } }]);
+    expect(findLiteralCredentialPaths(cfg)).toEqual(['surfaces[0].roles[0].credentials.password']);
+  });
+
+  it('ignores roles without credentials', () => {
+    const cfg = cfgWithRoles([{ name: 'anon' }]);
+    expect(findLiteralCredentialPaths(cfg)).toEqual([]);
   });
 });

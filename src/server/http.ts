@@ -14,11 +14,18 @@ import { recoverFromDrfError } from '../probe/drf-error.js';
 import { recoverFromFastApiError } from '../probe/fastapi-error.js';
 import { loadSampleInputs } from '../samples/fixture-loader.js';
 import { log } from '../log.js';
-import { resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import type { ToolMeta, ProbeResult, Config, SurfaceRegistry, SurfaceRuntime } from '../types.js';
 import { buildDescribeAuth } from '../auth/describe-auth.js';
 import { isLoopbackRemote } from './loopback.js';
+import { resolveContainedPath } from './path-guard.js';
+import { validateExtraCookie } from './cookie-guard.js';
+import {
+  resolveTokenState,
+  buildAllowedHosts,
+  createMcpSecurityMiddleware,
+  logTokenStartup,
+} from './security.js';
 import {
   buildRegistry,
   buildAggregateCatalog,
@@ -214,6 +221,20 @@ function registerMetaTools(
         });
       }
 
+      // #cookie-injection: validate a caller-supplied extraCookie is a single,
+      // well-formed name=value pair before it reaches the outbound Cookie header.
+      if (args.extraCookie !== undefined) {
+        const cv = validateExtraCookie(args.extraCookie);
+        if (!cv.ok) {
+          return toolOk({
+            ok: false,
+            error: { code: cv.code, message: cv.message },
+            durationMs: 0,
+            revisionAtCall: runtime.catalog.revision,
+          });
+        }
+      }
+
       const result = await executeCall({
         tool,
         role: args.role,
@@ -312,8 +333,15 @@ function registerMetaTools(
   // surface_describe_auth
   server.tool(
     'surface_describe_auth',
-    'Describe the auth configuration for a role. LOOPBACK ONLY — credentials cross the wire.',
-    { role: z.string().min(1).describe('Role name from surfacemcp.config.json roles[]'), surface: optSurface },
+    'Describe the auth configuration for a role. Credential VALUES are redacted by default — only field names and per-field shape metadata (valueMeta) are returned. Pass revealSecrets: true to include plaintext values; that path is LOOPBACK-only and behind the /mcp token gate, and credentials cross the wire.',
+    {
+      role: z.string().min(1).describe('Role name from surfacemcp.config.json roles[]'),
+      surface: optSurface,
+      revealSecrets: z
+        .boolean()
+        .optional()
+        .describe('When true, include plaintext credential values (loopback + token gated). Default false: names and shapes only.'),
+    },
     async (args) => {
       if (httpReq && !isLoopbackRemote(httpReq)) {
         return toolError('not_loopback', 'surface_describe_auth requires a loopback connection');
@@ -322,8 +350,12 @@ function registerMetaTools(
       if ('error' in rt) return toolError('surface_required', rt.error);
       const role = rt.surface.roles.find((r) => r.name === args.role);
       if (!role) return toolError('not_found', `Unknown role: ${args.role}`);
-      log.info({ surface: rt.surface.name, role: args.role, kind: rt.surface.auth.kind }, 'describe_auth requested');
-      return toolOk(buildDescribeAuth(rt.surface.auth, role));
+      const reveal = args.revealSecrets === true;
+      log.info(
+        { surface: rt.surface.name, role: args.role, kind: rt.surface.auth.kind, revealSecrets: reveal },
+        'describe_auth requested'
+      );
+      return toolOk(buildDescribeAuth(rt.surface.auth, role, reveal));
     }
   );
 
@@ -446,8 +478,13 @@ function registerMetaTools(
       const rt = resolveRuntime(registry, args.surface);
       if ('error' in rt) return toolError('surface_required', rt.error);
 
+      // #path-traversal: confine pagePath to the resolved project root — reject
+      // absolute inputs and any `..` escape before touching the filesystem.
+      const guard = resolveContainedPath(rt.resolvedRoot, args.pagePath);
+      if (!guard.ok) return toolError(guard.code, guard.message);
+      const absPath = guard.absPath;
+
       const { readFileSync, existsSync } = await import('node:fs');
-      const absPath = resolve(rt.resolvedRoot, args.pagePath);
       if (!existsSync(absPath)) return toolError('not_found', `Page not found: ${args.pagePath}`);
 
       let content = '';
@@ -495,7 +532,21 @@ export async function createApp(
   app.locals.registry = registry;
   app.use(express.json({ limit: '4mb' }));
 
-  app.post('/mcp', async (req: Request, res: Response) => {
+  // ── Security gate for /mcp (see SPEC_SECURITY_HARDENING.md) ──────────────────
+  // DNS-rebinding protection (Host/Origin allowlist) + shared-secret bearer token.
+  // The SDK's transport-level `enableDnsRebindingProtection` options exist in
+  // 1.29.0 but are @deprecated in favour of external middleware, so we enforce
+  // it here instead. Bound to the loopback authorities we actually listen on.
+  const mcpPort = getMcpPort(config);
+  const tokenState = resolveTokenState();
+  const securityMiddleware = createMcpSecurityMiddleware({
+    tokenState,
+    allowedHosts: buildAllowedHosts(mcpPort),
+    allowedOrigins: [],
+  });
+  logTokenStartup(tokenState, `http://127.0.0.1:${mcpPort}/mcp`);
+
+  app.post('/mcp', securityMiddleware, async (req: Request, res: Response) => {
     const server = new McpServer({
       name: 'surfacemcp',
       version: '0.3.0',

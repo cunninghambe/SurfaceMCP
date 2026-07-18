@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { readFileSync, existsSync } from 'node:fs';
 import { resolve } from 'node:path';
 import type { Config } from './types.js';
+import { log } from './log.js';
 
 const SuccessCheckSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('redirect'), to: z.string() }),
@@ -117,12 +118,43 @@ const ConfigSchema = z
     }
   });
 
+/**
+ * Find every role credential whose value is an inline literal rather than a
+ * `$env:VAR` indirection. Literals in a committed config file are a secret-leak
+ * risk; secrets belong in a gitignored env file. Returns human-readable paths
+ * like `surfaces[0].roles[1].credentials.password`.
+ */
+export function findLiteralCredentialPaths(config: Config): string[] {
+  const paths: string[] = [];
+  config.surfaces.forEach((surface, si) => {
+    surface.roles.forEach((role, ri) => {
+      if (!role.credentials) return;
+      for (const [key, value] of Object.entries(role.credentials)) {
+        if (!value.startsWith('$env:')) {
+          paths.push(`surfaces[${si}].roles[${ri}].credentials.${key}`);
+        }
+      }
+    });
+  });
+  return paths;
+}
+
 export function loadConfig(configPath: string): Config {
   if (!existsSync(configPath)) {
     throw new Error(`Config not found: ${configPath}. Run \`surfacemcp init\` first.`);
   }
   const raw = JSON.parse(readFileSync(configPath, 'utf-8')) as unknown;
-  return ConfigSchema.parse(raw);
+  const config = ConfigSchema.parse(raw);
+
+  const literals = findLiteralCredentialPaths(config);
+  if (literals.length > 0) {
+    log.warn(
+      { literalCredentials: literals },
+      `Config has ${literals.length} literal credential value(s) not using $env: indirection. Move secrets to a gitignored .env.local and reference them as $env:VAR.`
+    );
+  }
+
+  return config;
 }
 
 export function findConfigPath(projectRoot: string): string {

@@ -29,31 +29,47 @@ const ownerRole: RoleConfig = {
 const anonymousRole: RoleConfig = { name: 'anon' };
 
 describe('buildDescribeAuth', () => {
-  it('form auth — returns resolved values keyed by post field name', () => {
+  it('form auth — redacts values by default (names + shapes only)', () => {
     const result = buildDescribeAuth(formAuth, ownerRole);
     expect(result.authKind).toBe('form');
     if (result.authKind !== 'form') return;
     expect(result.uiLoginPath).toBe('/auth/login');
     expect(result.fields).toEqual({ email: 'email', password: 'password' });
-    expect(result.values).toEqual({ email: 'test@example.com', password: 'secret' });
+    // Redacted by default: no plaintext values, shape metadata instead.
+    expect(result.redacted).toBe(true);
+    expect(result.values).toBeUndefined();
+    expect(result.valueMeta).toEqual({
+      email: { present: true, length: 'test@example.com'.length, source: 'literal' },
+      password: { present: true, length: 'secret'.length, source: 'literal' },
+    });
     expect(result.successCheck).toEqual({ kind: 'cookie', name: 'session' });
     expect(result.cookieName).toBe('session');
   });
 
-  it('form auth with uiLoginFields — returns values keyed by domFieldName', () => {
+  it('form auth with revealSecrets — returns resolved values keyed by post field name', () => {
+    const result = buildDescribeAuth(formAuth, ownerRole, true);
+    expect(result.authKind).toBe('form');
+    if (result.authKind !== 'form') return;
+    expect(result.redacted).toBe(false);
+    expect(result.fields).toEqual({ email: 'email', password: 'password' });
+    expect(result.values).toEqual({ email: 'test@example.com', password: 'secret' });
+  });
+
+  it('form auth with uiLoginFields + revealSecrets — returns values keyed by domFieldName', () => {
     const auth: AuthConfig = {
       ...formAuth,
       uiLoginPath: '/',
       uiLoginFields: { email: 'identifier', password: 'password' },
       uiTriggerSelector: 'button:has-text("Sign in")',
     };
-    const result = buildDescribeAuth(auth, ownerRole);
+    const result = buildDescribeAuth(auth, ownerRole, true);
     expect(result.authKind).toBe('form');
     if (result.authKind !== 'form') return;
     expect(result.uiLoginPath).toBe('/');
     expect(result.uiTriggerSelector).toBe('button:has-text("Sign in")');
     expect(result.fields).toEqual({ email: 'identifier', password: 'password' });
     expect(result.values).toEqual({ identifier: 'test@example.com', password: 'secret' });
+    expect(result.redacted).toBe(false);
   });
 
   it('form auth with uiTriggerSelector — passed through in result', () => {
@@ -73,8 +89,8 @@ describe('buildDescribeAuth', () => {
     expect(result.cookieName).toBeUndefined();
   });
 
-  it('nextauth without uiLoginFields — inverts auth.fields correctly', () => {
-    const result = buildDescribeAuth(nextauthAuth, ownerRole);
+  it('nextauth without uiLoginFields + revealSecrets — inverts auth.fields correctly', () => {
+    const result = buildDescribeAuth(nextauthAuth, ownerRole, true);
     expect(result.authKind).toBe('nextauth');
     if (result.authKind !== 'nextauth') return;
     expect(result.uiLoginPath).toBe('/api/auth/signin');
@@ -86,12 +102,24 @@ describe('buildDescribeAuth', () => {
     expect(result.cookieName).toBe('authjs.session-token');
   });
 
-  it('nextauth with uiLoginFields — uses it verbatim (no inversion)', () => {
+  it('nextauth — redacts values by default with valueMeta', () => {
+    const result = buildDescribeAuth(nextauthAuth, ownerRole);
+    expect(result.authKind).toBe('nextauth');
+    if (result.authKind !== 'nextauth') return;
+    expect(result.redacted).toBe(true);
+    expect(result.values).toBeUndefined();
+    expect(result.valueMeta).toEqual({
+      username: { present: true, length: 'test@example.com'.length, source: 'literal' },
+      password: { present: true, length: 'secret'.length, source: 'literal' },
+    });
+  });
+
+  it('nextauth with uiLoginFields + revealSecrets — uses it verbatim (no inversion)', () => {
     const auth: AuthConfig = {
       ...nextauthAuth,
       uiLoginFields: { email: 'auth-email', password: 'auth-pass' },
     };
-    const result = buildDescribeAuth(auth, ownerRole);
+    const result = buildDescribeAuth(auth, ownerRole, true);
     expect(result.authKind).toBe('nextauth');
     if (result.authKind !== 'nextauth') return;
     expect(result.fields).toEqual({ email: 'auth-email', password: 'auth-pass' });
@@ -122,30 +150,46 @@ describe('buildDescribeAuth', () => {
     expect(result).toEqual({ authKind: 'anonymous', reason: 'role_has_no_credentials' });
   });
 
-  it('$env:VAR resolution — resolves value from process.env', () => {
+  it('$env:VAR resolution — resolves value from process.env (reveal) and reports source: env', () => {
     const savedEnv = process.env['TEST_SECRET'];
     process.env['TEST_SECRET'] = 'env-resolved-password';
     try {
       const role: RoleConfig = { name: 'owner', credentials: { email: 'a@b.com', password: '$env:TEST_SECRET' } };
-      const result = buildDescribeAuth(formAuth, role);
-      expect(result.authKind).toBe('form');
-      if (result.authKind !== 'form') return;
-      expect(result.values.password).toBe('env-resolved-password');
+      const revealed = buildDescribeAuth(formAuth, role, true);
+      expect(revealed.authKind).toBe('form');
+      if (revealed.authKind !== 'form') return;
+      expect(revealed.values?.password).toBe('env-resolved-password');
+
+      // Default (redacted) reports provenance without the value.
+      const redacted = buildDescribeAuth(formAuth, role);
+      expect(redacted.authKind).toBe('form');
+      if (redacted.authKind !== 'form') return;
+      expect(redacted.values).toBeUndefined();
+      expect(redacted.valueMeta.password).toEqual({
+        present: true,
+        length: 'env-resolved-password'.length,
+        source: 'env',
+      });
     } finally {
       if (savedEnv === undefined) delete process.env['TEST_SECRET'];
       else process.env['TEST_SECRET'] = savedEnv;
     }
   });
 
-  it('missing env var — returns empty string', () => {
+  it('missing env var — reveals empty string and reports present: false, source: env', () => {
     // Ensure the env var is not set
     const key = 'SURFACEMCP_NONEXISTENT_VAR_12345';
     delete process.env[key];
     const role: RoleConfig = { name: 'owner', credentials: { email: 'a@b.com', password: `$env:${key}` } };
-    const result = buildDescribeAuth(formAuth, role);
-    expect(result.authKind).toBe('form');
-    if (result.authKind !== 'form') return;
-    expect(result.values.password).toBe('');
+    const revealed = buildDescribeAuth(formAuth, role, true);
+    expect(revealed.authKind).toBe('form');
+    if (revealed.authKind !== 'form') return;
+    expect(revealed.values?.password).toBe('');
+
+    const redacted = buildDescribeAuth(formAuth, role);
+    expect(redacted.authKind).toBe('form');
+    if (redacted.authKind !== 'form') return;
+    expect(redacted.valueMeta.password).toEqual({ present: false, length: 0, source: 'env' });
   });
 });
 
