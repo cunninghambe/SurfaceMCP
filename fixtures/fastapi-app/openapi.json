@@ -6,7 +6,27 @@
       "get": {
         "operationId": "list_users",
         "summary": "List users",
-        "responses": { "200": { "description": "OK" } }
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "id": { "type": "integer" },
+                      "name": { "type": "string" },
+                      "email": { "type": "string", "format": "email" }
+                    },
+                    "required": ["id", "name", "email"]
+                  }
+                }
+              }
+            }
+          }
+        }
       },
       "post": {
         "operationId": "create_user",
@@ -35,7 +55,24 @@
         "operationId": "get_user",
         "summary": "Get user",
         "parameters": [{ "in": "path", "name": "user_id", "required": true, "schema": { "type": "integer" } }],
-        "responses": { "200": { "description": "OK" } }
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "id": { "type": "integer" },
+                    "name": { "type": "string" },
+                    "email": { "type": "string", "format": "email" }
+                  },
+                  "required": ["id", "name", "email"]
+                }
+              }
+            }
+          }
+        }
       },
       "put": {
         "operationId": "update_user",
