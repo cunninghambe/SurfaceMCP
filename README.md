@@ -73,6 +73,7 @@ The server speaks Streamable HTTP MCP at `POST /mcp` on the allocated port (boun
 | `regenerate` | Force re-extraction of the catalog. |
 | `doctor` | Validate config, test logins, check port allocation. |
 | `schema` | Print the JSON Schema for `surfacemcp.config.json` (for editor autocomplete). |
+| `export` | Emit an OpenAPI 3.1 document for the discovered surface (`--surface`, `--out`). |
 
 `serve` starts the MCP endpoint immediately and never blocks on the target: if a
 surface sets `launchDevCommand` and its `baseUrl` isn't reachable, the dev server
@@ -92,6 +93,8 @@ surfacemcp schema > surfacemcp.config.schema.json
 
 Discovery: `surface_list_tools`, `surface_describe_tool`, `surface_describe_self`, `surface_list_surfaces`, `surface_list_pages`, `surface_routes_for_page`, `surface_list_navigations`.
 Invocation: `surface_call`, `surface_probe`, `surface_sample_inputs`.
+
+Tools carry both an `inputSchema` and, where the source provides it (OpenAPI/FastAPI response schemas), an `outputSchema` describing what a call returns. The whole surface can be exported as a portable OpenAPI 3.1 document with `surfacemcp export`.
 Auth: `surface_describe_auth`, `surface_login_status`, `surface_relogin`.
 Runtime route enumeration: `surface_enumerate_routes_runtime`, `surface_postprocess_runtime_routes`.
 

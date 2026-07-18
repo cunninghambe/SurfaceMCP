@@ -9,11 +9,13 @@ type OpenApiSpec = {
   paths?: Record<string, Record<string, OpenApiOp>>;
 };
 
+type OpenApiContent = Record<string, { schema?: JsonSchema2020 }>;
+
 type OpenApiOp = {
   operationId?: string;
   summary?: string;
   requestBody?: {
-    content?: Record<string, { schema?: JsonSchema2020 }>;
+    content?: OpenApiContent;
   };
   parameters?: Array<{
     in: string;
@@ -21,10 +23,29 @@ type OpenApiOp = {
     schema?: JsonSchema2020;
     required?: boolean;
   }>;
+  responses?: Record<string, { content?: OpenApiContent }>;
 };
 
 function normalizeApiPath(path: string): string {
   return path.replace(/\{(\w+)\}/g, ':$1');
+}
+
+/**
+ * Extract the JSON response schema for a route's success (2xx) response, so tools
+ * advertise what they return. Prefers 200 → 201 → any 2xx → `default`. May contain
+ * `$ref`s into components (left unresolved, as with request schemas).
+ */
+export function extractResponseSchema(op: {
+  responses?: Record<string, { content?: OpenApiContent }>;
+}): JsonSchema2020 | undefined {
+  const responses = op.responses ?? {};
+  const preferred = ['200', '201', '202', '203', '204', '2XX', 'default'];
+  const code =
+    preferred.find((c) => responses[c]) ??
+    Object.keys(responses).find((c) => /^2\d\d$/.test(c));
+  if (!code) return undefined;
+  const content = responses[code]?.content;
+  return content?.['application/json']?.schema ?? undefined;
 }
 
 function parseSpec(content: string, filePath: string): OpenApiSpec {
@@ -104,6 +125,8 @@ export function extractOpenApiRoutes(root: string): RawToolMeta[] {
       nameCounts.set(base, count + 1);
       const name = count === 0 ? base : `${base}_${count + 1}`;
 
+      const outputSchema = extractResponseSchema(op);
+
       tools.push({
         name,
         toolId: toolId(method.toUpperCase(), normalizedPath),
@@ -111,6 +134,7 @@ export function extractOpenApiRoutes(root: string): RawToolMeta[] {
         path: normalizedPath,
         inputSchema: schema,
         inputSchemaConfidence: confidence,
+        ...(outputSchema ? { outputSchema } : {}),
         sideEffectClass: methodToSideEffect(method),
         sourceFile: specFile,
         sourceLine: 0,

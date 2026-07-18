@@ -1,5 +1,5 @@
 import type { RawToolMeta, JsonSchema2020 } from '../../types.js';
-import { extractOpenApiRoutes } from '../openapi/parse.js';
+import { extractOpenApiRoutes, extractResponseSchema } from '../openapi/parse.js';
 import { toolId, pathToToolName, methodToSideEffect } from '../common.js';
 import { log } from '../../log.js';
 
@@ -25,7 +25,7 @@ type OpenApiOperation = {
     schema?: JsonSchema2020;
     required?: boolean;
   }>;
-  responses?: Record<string, unknown>;
+  responses?: Record<string, { content?: Record<string, { schema?: JsonSchema2020 }> }>;
 };
 
 function normalizeApiPath(path: string): string {
@@ -74,6 +74,7 @@ function specToTools(spec: OpenApiSchema): RawToolMeta[] {
     for (const [method, op] of Object.entries(methods)) {
       if (['get', 'post', 'put', 'patch', 'delete', 'head', 'options'].includes(method.toLowerCase())) {
         const { schema, confidence } = buildInputSchema(op, method);
+        const outputSchema = extractResponseSchema(op);
         const base = pathToToolName(method, path);
         const count = nameCounts.get(base) ?? 0;
         nameCounts.set(base, count + 1);
@@ -86,6 +87,7 @@ function specToTools(spec: OpenApiSchema): RawToolMeta[] {
           path: normalizedPath,
           inputSchema: schema,
           inputSchemaConfidence: confidence,
+          ...(outputSchema ? { outputSchema } : {}),
           sideEffectClass: methodToSideEffect(method),
           sourceFile: '',
           sourceLine: 0,

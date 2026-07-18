@@ -110,6 +110,16 @@ async function main(): Promise<void> {
       break;
     }
 
+    case 'export': {
+      const { runExport } = await import('./export.js');
+      await runExport({
+        projectRoot: typeof args['project-root'] === 'string' ? args['project-root'] : undefined,
+        surface: typeof args['surface'] === 'string' ? args['surface'] : undefined,
+        out: typeof args['out'] === 'string' ? args['out'] : undefined,
+      });
+      break;
+    }
+
     default:
       console.log(`
 surfacemcp — HTTP MCP server for typed API surface discovery
@@ -123,6 +133,7 @@ Commands:
   regenerate    Force re-extraction
   doctor        Validate config, test logins, check ports
   schema        Print the JSON Schema for surfacemcp.config.json
+  export        Emit an OpenAPI 3.1 doc for the surface (--surface, --out)
 
 Options:
   --stack=<nextjs|express|fastapi|django|openapi>
