@@ -3,7 +3,7 @@ import { writeFileSync, readFileSync } from 'node:fs';
 import { loadConfig, findConfigPath } from '../config.js';
 import { loadEnvFiles } from '../env/indirection.js';
 import { regenerateCatalogForSurface, getCatalog } from '../server/tools-meta.js';
-import { buildOpenApiDocument } from '../export/openapi.js';
+import { buildOpenApiResult } from '../export/openapi.js';
 
 type ExportOptions = {
   projectRoot?: string;
@@ -46,17 +46,24 @@ export async function runExport(opts: ExportOptions): Promise<void> {
   await regenerateCatalogForSurface(surface, root);
   const catalog = getCatalog();
 
-  const doc = buildOpenApiDocument(catalog.tools, {
+  const { document, skippedGraphql } = buildOpenApiResult(catalog.tools, {
     title: `${surface.name} (SurfaceMCP)`,
     version: readVersion(),
     baseUrl: surface.baseUrl,
   });
-  const json = JSON.stringify(doc, null, 2);
+  const json = JSON.stringify(document, null, 2);
 
+  if (skippedGraphql > 0) {
+    console.error(
+      `Note: skipped ${skippedGraphql} GraphQL operation(s) — GraphQL operations post to a single endpoint and don't map to REST paths. Use the GraphQL SDL/introspection for that surface instead.`
+    );
+  }
+
+  const restCount = catalog.tools.length - skippedGraphql;
   if (opts.out) {
     const outPath = resolve(projectRoot, opts.out);
     writeFileSync(outPath, `${json}\n`);
-    console.error(`Wrote ${catalog.tools.length} operations to ${outPath}`);
+    console.error(`Wrote ${restCount} operation(s) to ${outPath}`);
   } else {
     process.stdout.write(`${json}\n`);
   }

@@ -157,49 +157,10 @@ export type PageSkip = {
   declaredAt?: { file: string; line: number };
 };
 
-export type AuthConfig =
-  | { kind: 'none' }
-  | {
-      kind: 'form';
-      preLogin?: {
-        method: 'GET' | 'POST';
-        path: string;
-        captureBodyFieldAs?: string;
-        captureBodyRegex?: string;
-        captureCookieAs?: string;
-      };
-      loginMethod: 'POST' | 'GET';
-      loginPath: string;
-      loginFields: Record<string, string>;
-      bodyFormat?: 'form' | 'json';
-      successCheck: SuccessCheck;
-      /** UI route to navigate for in-browser login. Defaults to loginPath. */
-      uiLoginPath?: string;
-      /** DOM field-name overrides for UI login. Maps credentialKey -> domFieldName. Defaults to loginFields. */
-      uiLoginFields?: Record<string, string>;
-      /** CSS selector to click before the login form appears (e.g. a modal trigger). */
-      uiTriggerSelector?: string;
-      /** CSS selector for the submit button. Falls back to text-based discovery when unset. */
-      uiSubmitSelector?: string;
-    }
-  | {
-      kind: 'nextauth';
-      csrfPath?: string;
-      callbackPath?: string;
-      cookieName?: string;
-      fields: Record<string, string>;
-      callbackUrl?: string;
-      /** UI route to navigate for in-browser login. Defaults to '/api/auth/signin'. */
-      uiLoginPath?: string;
-      /** DOM field-name overrides for UI login. Maps credentialKey -> domFieldName. Defaults to inverted fields. */
-      uiLoginFields?: Record<string, string>;
-      /** CSS selector to click before the login form appears. */
-      uiTriggerSelector?: string;
-      /** CSS selector for the submit button. Falls back to text-based discovery when unset. */
-      uiSubmitSelector?: string;
-    }
-  | { kind: 'bearer' }
-  | { kind: 'api_key'; header?: string; query?: string };
+// Config-shape types are inferred from the Zod schemas in config.ts (single
+// source of truth) and re-exported here so existing importers are unaffected.
+export type { SuccessCheck, AuthConfig, RoleConfig, SurfaceConfig, Config } from './config.js';
+import type { SuccessCheck, AuthConfig, RoleConfig, SurfaceConfig, Config } from './config.js';
 
 /**
  * Non-secret shape metadata for a single credential field. Reports whether a
@@ -254,51 +215,6 @@ export type DescribeAuthResult =
       successCheck: SuccessCheck;
       cookieName: string;
     };
-
-export type SuccessCheck =
-  | { kind: 'redirect'; to: string }
-  | { kind: 'cookie'; name: string }
-  | { kind: 'status'; code: number }
-  | { kind: 'localStorage'; key: string; tokenJsonPath?: string; minLength?: number }
-  | { kind: 'dom_signal'; selector: string };
-
-export type RoleConfig = {
-  name: string;
-  /** Optional. A role without credentials is anonymous: no login flow, requests go unauthenticated. */
-  credentials?: Record<string, string>;
-};
-
-export type SurfaceConfig = {
-  name: string;
-  stack: Stack;
-  root: string;
-  baseUrl: string;
-  port: number;
-  /**
-   * GraphQL endpoint path for the `graphql` stack. Every GraphQL tool posts here.
-   * Defaults to `/graphql` when unset. Ignored by all other stacks.
-   */
-  graphqlPath?: string;
-  launchDevCommand?: string;
-  watchPaths?: string[];
-  watchIgnore?: string[];
-  auth: AuthConfig;
-  roles: RoleConfig[];
-  schemaIntrospection?: {
-    zodAlias?: string;
-    pydanticBaseClass?: string;
-    bodyValidatorNames?: string[];
-  };
-  excludedRoutes?: string[];
-  externalIntegrations?: string[];
-  _suggestedExternalIntegrations?: string[];
-};
-
-export type Config = {
-  surfaces: SurfaceConfig[];
-  /** Optional explicit MCP listen port. When unset, surfaces[0].port is used. */
-  mcpPort?: number;
-};
 
 /** Stored session state per role */
 export type RoleSession = {
