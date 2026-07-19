@@ -40,6 +40,16 @@ describe('stack detection', () => {
     expect(detectStack(resolve(FIXTURES, 'graphql-app'))).toBe('graphql');
   });
 
+  it('detects graphql for graphql-deep-app fixture (schema-first, deep/cyclic types)', () => {
+    expect(detectStack(resolve(FIXTURES, 'graphql-deep-app'))).toBe('graphql');
+  });
+
+  it('detects graphql for graphql-codefirst-app fixture (type-graphql resolver decorators, no SDL)', () => {
+    // No express/fastify/@nestjs deps → earlier detectors miss; the code-first branch
+    // (type-graphql dep + @Resolver/@Query decorators) matches.
+    expect(detectStack(resolve(FIXTURES, 'graphql-codefirst-app'))).toBe('graphql');
+  });
+
   it('returns null for unknown directory', () => {
     expect(detectStack('/tmp')).toBeNull();
   });

@@ -1,0 +1,27 @@
+{
+  "surfaces": [
+    {
+      "name": "api",
+      "stack": "graphql",
+      "root": ".",
+      "baseUrl": "http://127.0.0.1:4000",
+      "port": 3103,
+      "graphqlPath": "/graphql",
+      "launchDevCommand": "npm run dev",
+      "watchPaths": [
+        ".",
+        "src"
+      ],
+      "watchIgnore": [],
+      "auth": {
+        "kind": "none"
+      },
+      "roles": [
+        { "name": "anonymous", "credentials": {} }
+      ],
+      "excludedRoutes": [],
+      "externalIntegrations": [],
+      "_suggestedExternalIntegrations": []
+    }
+  ]
+}

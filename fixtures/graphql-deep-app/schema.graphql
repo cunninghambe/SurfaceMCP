@@ -1,0 +1,40 @@
+# Deep + cyclic schema exercising bounded selection depth and cycle protection.
+
+type Country {
+  code: String!
+  name: String!
+}
+
+type Address {
+  street: String!
+  city: String!
+  country: Country
+}
+
+type Person {
+  id: ID!
+  name: String!
+  address: Address
+}
+
+type Organization {
+  id: ID!
+  name: String!
+  ceo: Person
+}
+
+# Self-referential: `manager` / `reports` recurse straight back into Employee.
+type Employee {
+  id: ID!
+  name: String!
+  manager: Employee
+  reports: [Employee!]!
+}
+
+type Query {
+  # Organization -> Person -> Address -> Country is four object levels; with
+  # DEFAULT_SELECTION_DEPTH = 3 only the first three expand and Country truncates.
+  org: Organization
+  # Employee recurses into itself; expansion must stop after the scalar leaves.
+  employee(id: ID!): Employee
+}

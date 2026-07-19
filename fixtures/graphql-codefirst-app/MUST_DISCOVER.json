@@ -1,0 +1,25 @@
+{
+  "operations": [
+    {
+      "toolId": "1d0bad65466b",
+      "name": "query_recipes",
+      "operationType": "query",
+      "field": "recipes",
+      "sideEffectClass": "safe"
+    },
+    {
+      "toolId": "d5d7b6dfe860",
+      "name": "query_recipe",
+      "operationType": "query",
+      "field": "recipe",
+      "sideEffectClass": "safe"
+    },
+    {
+      "toolId": "6c30c4fb90b3",
+      "name": "mutation_addRecipe",
+      "operationType": "mutation",
+      "field": "addRecipe",
+      "sideEffectClass": "mutating"
+    }
+  ]
+}

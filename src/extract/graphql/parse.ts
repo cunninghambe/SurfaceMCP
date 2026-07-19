@@ -25,11 +25,23 @@ const IGNORED_DIRS = new Set(['node_modules', 'dist', '.git', '.surfacemcp', '.n
 const SDL_RE = /\.(graphql|gql)$/i;
 
 /**
+ * Maximum object-nesting depth expanded into `outputSchema` and the generated
+ * selection set. Depth 1 = the return object's own scalar/enum leaves only; each
+ * additional level expands one more layer of nested object fields. Bounded so a
+ * broad schema can't produce an unboundedly large selection, and paired with
+ * per-path cycle tracking so a self-referential type still terminates.
+ *
+ * Shared with the code-first extractor so both schemas expand to the same depth.
+ */
+export const DEFAULT_SELECTION_DEPTH = 3;
+
+/**
  * Operation-keyed stable id. Every GraphQL tool shares `POST <graphqlPath>`, so the
  * REST `sha1(method:path)` scheme would collapse them onto one id. Key on the
  * operation instead — mirrors the server-actions precedent (`sha1(serveraction:…)`).
+ * Exported so the code-first extractor keys tools identically (one id scheme).
  */
-function computeGraphqlToolId(operationType: 'query' | 'mutation', field: string): string {
+export function computeGraphqlToolId(operationType: 'query' | 'mutation', field: string): string {
   return createHash('sha1')
     .update(`graphql:${operationType}:${field}`)
     .digest('hex')
@@ -37,7 +49,7 @@ function computeGraphqlToolId(operationType: 'query' | 'mutation', field: string
 }
 
 /** `query_<field>` / `mutation_<field>`. Path-based `pathToToolName` can't express this. */
-function operationToolName(operationType: 'query' | 'mutation', field: string): string {
+export function operationToolName(operationType: 'query' | 'mutation', field: string): string {
   return `${operationType}_${field}`;
 }
 
@@ -158,13 +170,14 @@ function buildInputSchema(field: GraphQLField<unknown, unknown>): JsonSchema2020
 }
 
 /**
- * Build the outputSchema + shallow selection set for a root field's return type.
- * Depth limit: object return types are expanded exactly one level. Scalar/enum leaf
- * fields become JSON Schema properties and enter the selection set; nested object /
- * list-of-object fields are emitted as opaque `{type:'object'}` / `{type:'array'}`
- * markers and are NOT selected (selecting them would need a nested sub-selection).
+ * Build the outputSchema + selection set for a root field's return type, expanding
+ * object return types to `maxDepth` levels of nesting (default `DEFAULT_SELECTION_DEPTH`)
+ * with per-path cycle protection. Scalar/enum returns take no selection set.
  */
-function buildOutputAndSelection(returnType: GraphQLType): {
+function buildOutputAndSelection(
+  returnType: GraphQLType,
+  maxDepth = DEFAULT_SELECTION_DEPTH,
+): {
   outputSchema?: JsonSchema2020;
   selection?: string;
 } {
@@ -178,36 +191,60 @@ function buildOutputAndSelection(returnType: GraphQLType): {
     return { outputSchema: maybeArray(enumToJsonSchema(named), isList) };
   }
   if (isObjectType(named) || isInterfaceType(named)) {
-    const { objectSchema, selection } = shallowObject(named);
+    const { objectSchema, selection } = expandObject(named, maxDepth, new Set([named.name]));
     return { outputSchema: maybeArray(objectSchema, isList), selection };
   }
   // Union or otherwise unhandled composite — return __typename so the query is valid.
   return { outputSchema: maybeArray({ type: 'object', additionalProperties: true }, isList), selection: '__typename' };
 }
 
-function shallowObject(t: GraphQLObjectType | GraphQLInterfaceType): {
-  objectSchema: JsonSchema2020;
-  selection: string;
-} {
+/**
+ * Expand an object/interface type into a JSON Schema object plus a GraphQL selection
+ * string, bounded to `levels` of object nesting and guarded against cycles.
+ *
+ * - Scalar/enum leaf fields always become properties and enter the selection set.
+ * - A nested object/interface field is expanded recursively while (a) `levels > 1`
+ *   AND (b) its named type is not already on the current path (`visited`). When
+ *   either guard trips the field becomes an opaque `{ type: 'object' }` marker and is
+ *   NOT selected — this bounds the depth and terminates self-referential types.
+ * - `visited` is copied per branch, so two sibling fields of the same type each
+ *   expand (a diamond is fine); only a true cycle *along one path* is cut.
+ * - An object with no selectable field one level down falls back to `__typename`, so
+ *   the emitted selection set is never empty (an empty `{}` is invalid GraphQL).
+ */
+function expandObject(
+  t: GraphQLObjectType | GraphQLInterfaceType,
+  levels: number,
+  visited: Set<string>,
+): { objectSchema: JsonSchema2020; selection: string } {
   const properties: Record<string, JsonSchema2020> = {};
-  const selectionFields: string[] = [];
+  const selectionParts: string[] = [];
   for (const [fieldName, field] of Object.entries(t.getFields())) {
     if (fieldName.startsWith('__')) continue;
     const fieldIsList = typeContainsList(field.type);
     const fieldNamed = getNamedType(field.type);
     if (isScalarType(fieldNamed)) {
       properties[fieldName] = maybeArray(scalarToJsonSchema(fieldNamed.name), fieldIsList);
-      selectionFields.push(fieldName);
+      selectionParts.push(fieldName);
     } else if (isEnumType(fieldNamed)) {
       properties[fieldName] = maybeArray(enumToJsonSchema(fieldNamed), fieldIsList);
-      selectionFields.push(fieldName);
+      selectionParts.push(fieldName);
+    } else if (
+      (isObjectType(fieldNamed) || isInterfaceType(fieldNamed)) &&
+      levels > 1 &&
+      !visited.has(fieldNamed.name)
+    ) {
+      const nested = expandObject(fieldNamed, levels - 1, new Set(visited).add(fieldNamed.name));
+      properties[fieldName] = maybeArray(nested.objectSchema, fieldIsList);
+      selectionParts.push(`${fieldName} { ${nested.selection} }`);
     } else {
-      // Nested object/list-of-object: opaque marker, not selected (depth limit).
+      // Depth budget exhausted, a cycle, or an unhandled composite (union): opaque
+      // marker, not selected (selecting it would need a nested sub-selection).
       properties[fieldName] = maybeArray({ type: 'object' }, fieldIsList);
     }
   }
   // A GraphQL object selection set can't be empty; __typename is always valid.
-  const selection = selectionFields.length ? selectionFields.join(' ') : '__typename';
+  const selection = selectionParts.length ? selectionParts.join(' ') : '__typename';
   return { objectSchema: { type: 'object', properties }, selection };
 }
 
