@@ -110,6 +110,107 @@ describe('nestjs route extraction', () => {
     expect(del!.inputSchema).toEqual({ type: 'object', additionalProperties: true });
   });
 
+  it('introspects arrays, nested DTOs, enums, and constraints (POST /orders)', () => {
+    const tools = extractNestjsRoutes(root);
+    const post = tools.find((t) => t.method === 'POST' && t.path === '/orders');
+    expect(post).toBeDefined();
+    expect(post!.inputSchemaConfidence).toBe('introspected');
+    expect(post!.inputSchema).toEqual({
+      type: 'object',
+      properties: {
+        // length constraints
+        reference: { type: 'string', minLength: 3, maxLength: 20 },
+        // enum (from @IsEnum + enum-typed property), with uniform `type`
+        status: { enum: ['pending', 'shipped', 'delivered'], type: 'string' },
+        // array of primitives (@IsArray + @IsString({ each: true }))
+        tags: { type: 'array', items: { type: 'string' } },
+        // array of nested DTO objects
+        lines: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: {
+              sku: { type: 'string' },
+              quantity: { type: 'integer', minimum: 1, maximum: 999 },
+            },
+            required: ['sku', 'quantity'],
+          },
+        },
+        // nested DTO-typed property, inlined recursively
+        shippingAddress: {
+          type: 'object',
+          properties: {
+            street: { type: 'string', minLength: 3, maxLength: 120 },
+            city: { type: 'string' },
+            zip: { type: 'string' },
+          },
+          required: ['street', 'city'],
+        },
+        // @IsPositive -> exclusiveMinimum
+        total: { type: 'number', exclusiveMinimum: 0 },
+        // numeric constraints on an optional integer
+        discountPercent: { type: 'integer', minimum: 0, maximum: 100 },
+      },
+      required: ['reference', 'status', 'tags', 'lines', 'shippingAddress', 'total'],
+    });
+  });
+
+  it('supports @Body(field) single-field picks (PATCH /orders/:id/status)', () => {
+    const tools = extractNestjsRoutes(root);
+    const patch = tools.find((t) => t.method === 'PATCH' && t.path === '/orders/:id/status');
+    expect(patch).toBeDefined();
+    expect(patch!.inputSchemaConfidence).toBe('introspected');
+    // Only the picked field is introspected, wrapped in a one-property object.
+    expect(patch!.inputSchema).toEqual({
+      type: 'object',
+      properties: {
+        status: { enum: ['pending', 'shipped', 'delivered'], type: 'string' },
+      },
+      required: ['status'],
+    });
+  });
+
+  it('terminates on a directly self-referential DTO (POST /orders/categories)', () => {
+    const tools = extractNestjsRoutes(root);
+    const post = tools.find((t) => t.method === 'POST' && t.path === '/orders/categories');
+    expect(post).toBeDefined();
+    expect(post!.inputSchemaConfidence).toBe('introspected');
+    // Both the direct self-ref (`parent`) and the array self-ref (`children`)
+    // degrade to an open object instead of recursing forever.
+    expect(post!.inputSchema).toEqual({
+      type: 'object',
+      properties: {
+        name: { type: 'string' },
+        parent: { type: 'object' },
+        children: { type: 'array', items: { type: 'object' } },
+      },
+      required: ['name'],
+    });
+  });
+
+  it('terminates on transitively cyclic DTOs A -> B -> A (POST /orders/graph)', () => {
+    const tools = extractNestjsRoutes(root);
+    const post = tools.find((t) => t.method === 'POST' && t.path === '/orders/graph');
+    expect(post).toBeDefined();
+    expect(post!.inputSchemaConfidence).toBe('introspected');
+    // A expands B one level; B's back-reference to A (already on the path) is cut.
+    expect(post!.inputSchema).toEqual({
+      type: 'object',
+      properties: {
+        id: { type: 'string' },
+        b: {
+          type: 'object',
+          properties: {
+            label: { type: 'string' },
+            a: { type: 'object' },
+          },
+          required: ['label'],
+        },
+      },
+      required: ['id'],
+    });
+  });
+
   it('emits posix sourceFile, valid tool names, and unique toolIds', () => {
     const tools = extractNestjsRoutes(root);
     for (const t of tools) {
