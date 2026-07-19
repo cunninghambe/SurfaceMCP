@@ -472,13 +472,19 @@ function registerMetaTools(
   // surface_routes_for_page
   server.tool(
     'surface_routes_for_page',
-    'Find API tools referenced by a page. Accepts either an SPA route path (e.g. "/admin/users", as returned by surface_list_pages) or a source-file path relative to the project root. Best-effort static scan.',
+    'Find API tools referenced by a page. Accepts an SPA route path (e.g. "/admin/users", or a concrete instance like "/users/123" which resolves to the "/users/:id" page) or a source-file path relative to the project root. Best-effort static scan. Set crossSurface to also match tools defined in OTHER ready surfaces (e.g. an SPA page fetching a separate backend API).',
     {
       pagePath: z
         .string()
         .min(1)
-        .describe('SPA route path (e.g. "/admin/users") or a source-file path relative to the project root'),
+        .describe('SPA route path (e.g. "/admin/users" or "/users/123") or a source-file path relative to the project root'),
       surface: optSurface,
+      crossSurface: z
+        .boolean()
+        .optional()
+        .describe(
+          'When true, scan API tools across ALL ready surfaces, not just this one. Each matched tool is annotated with its owning surface. Default false (same-surface only).'
+        ),
     },
     async (args) => {
       const rt = resolveRuntime(registry, args.surface);
@@ -487,11 +493,17 @@ function registerMetaTools(
       // Resolve SPA routes via the page catalog (same route table
       // surface_list_pages exposes), falling back to treating pagePath as a
       // source-file path. The path-traversal guard is applied inside.
+      //
+      // Tool scan scope: by default only the resolved surface's own tools. With
+      // crossSurface, gather every ready surface's tools (an SPA page's
+      // `fetch('/api/…')` may target a separate backend surface). Each match
+      // carries its `surface`, so cross-surface hits are attributable.
+      const tools = args.crossSurface ? buildAggregateCatalog(registry).tools : rt.catalog.tools;
       const result = resolveRoutesForPage({
         root: rt.resolvedRoot,
         pagePath: args.pagePath,
         pages: rt.pageCatalog.pages,
-        tools: rt.catalog.tools,
+        tools,
       });
       if (!result.ok) return toolError(result.code, result.message);
       return toolOk(result.data);

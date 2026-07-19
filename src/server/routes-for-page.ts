@@ -6,10 +6,11 @@
 //
 // Callers can identify the page two ways:
 //   1. An SPA route path exactly as returned by `surface_list_pages`
-//      (e.g. '/admin/users', '/users/:id'). These are React-Router-defined
-//      routes and do NOT correspond to a source-file path, so they must be
-//      resolved through the page catalog (route → component sourceFile) before
-//      any filesystem access.
+//      (e.g. '/admin/users', '/users/:id'), OR a concrete instance of a
+//      dynamic route (e.g. '/users/123', which resolves to the '/users/:id'
+//      page). These are React-Router-defined routes and do NOT correspond to a
+//      source-file path, so they must be resolved through the page catalog
+//      (route → component sourceFile) before any filesystem access.
 //   2. A source-file path relative to the project root (e.g.
 //      'app/journal/page.tsx'). Used by file-based stacks (Next.js/Express/…)
 //      that populate no page catalog, and still accepted for Vite.
@@ -40,16 +41,92 @@ function normRouteKey(input: string): string {
   return r;
 }
 
-/** Find the catalog page whose route matches `pagePath` (slash-normalised). */
+/**
+ * True when a whole route segment is a single dynamic-param placeholder in any
+ * of the syntaxes our stack extractors emit (react-router `:id`, OpenAPI/FastAPI
+ * `{id}`, Django `<int:pk>`). A segment with a static prefix (e.g. `v:id`) is
+ * NOT a placeholder — the entire segment must be the token.
+ */
+function isParamSegment(seg: string): boolean {
+  return (
+    /^:[A-Za-z_]\w*$/.test(seg) ||
+    /^\{[A-Za-z_]\w*\}$/.test(seg) ||
+    /^<(?:\w+:)?[A-Za-z_]\w*>$/.test(seg)
+  );
+}
+
+/** Split a slash-normalised route into its path segments ('/' → []). */
+function routeSegments(normalisedRoute: string): string[] {
+  return normalisedRoute === '/' ? [] : normalisedRoute.slice(1).split('/');
+}
+
+/**
+ * Match a concrete instance path (e.g. '/users/123') against catalog route
+ * *templates* (e.g. '/users/:id'). A template is a candidate when it has the
+ * same segment count and every segment either equals the concrete segment or is
+ * a param placeholder.
+ *
+ * Precedence: the most-specific candidate wins, i.e. the one with the FEWEST
+ * param segments (so `/files/:name` beats `/:a/:b` for '/files/report'). This
+ * also means a fully-static route outranks any param route of the same shape —
+ * though in practice a static route matching the concrete path is already
+ * returned by the exact fast path in `matchPageByRoute` before we get here.
+ * Ties (equal param counts) resolve to catalog order.
+ */
+function matchPageByTemplate(pages: Page[], concreteKey: string): Page | undefined {
+  const concreteSegs = routeSegments(concreteKey);
+  let best: { page: Page; params: number } | undefined;
+
+  for (const p of pages) {
+    const routeSegs = routeSegments(normRouteKey(p.route));
+    if (routeSegs.length !== concreteSegs.length) continue;
+
+    let params = 0;
+    let matches = true;
+    for (let i = 0; i < routeSegs.length; i++) {
+      const seg = routeSegs[i]!;
+      if (isParamSegment(seg)) {
+        params++;
+      } else if (seg !== concreteSegs[i]) {
+        matches = false;
+        break;
+      }
+    }
+    if (!matches) continue;
+    if (!best || params < best.params) best = { page: p, params };
+  }
+
+  return best?.page;
+}
+
+/**
+ * Find the catalog page for `pagePath`.
+ *
+ * Precedence:
+ *   1. Exact (slash-normalised) match — the fast path. Catches a fully static
+ *      route, or a dynamic route the caller passed verbatim ('/users/:id').
+ *   2. Template match — a concrete instance path ('/users/123') resolves to the
+ *      matching route template ('/users/:id'). See `matchPageByTemplate` for how
+ *      the most-specific (fewest-params) template is chosen.
+ */
 export function matchPageByRoute(pages: Page[], pagePath: string): Page | undefined {
   const key = normRouteKey(pagePath);
-  return pages.find((p) => normRouteKey(p.route) === key);
+  const exact = pages.find((p) => normRouteKey(p.route) === key);
+  if (exact) return exact;
+  return matchPageByTemplate(pages, key);
 }
 
 export type RoutesForPageMatch = {
   toolId: string;
   name: string;
   sourceLocation: string;
+  /**
+   * Surface that owns the matched tool. With same-surface resolution this is
+   * always the resolved surface; with cross-surface resolution (the caller
+   * passes tools aggregated across surfaces) it names whichever surface's
+   * catalog the tool came from.
+   */
+  surface: string;
 };
 
 export type RoutesForPageData = {
@@ -92,6 +169,7 @@ function matchToolsInSource(content: string, tools: ToolMeta[]): RoutesForPageMa
     toolId: t.toolId,
     name: t.name,
     sourceLocation: `${t.sourceFile}:${t.sourceLine}`,
+    surface: t.surface,
   }));
 }
 
