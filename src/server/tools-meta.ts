@@ -9,6 +9,7 @@ import { fetchFastApiSchema } from '../extract/fastapi/openapi-fetch.js';
 import { extractDjangoRoutes } from '../extract/django/ast-walk.js';
 import { extractOpenApiRoutes } from '../extract/openapi/parse.js';
 import { extractGraphqlSchema } from '../extract/graphql/parse.js';
+import { extractGraphqlCodeFirst } from '../extract/graphql/code-first.js';
 import { extractPagesForStack } from '../extract/pages/index.js';
 import { classifyByCallGraph } from '../classify/call-graph.js';
 import { log } from '../log.js';
@@ -58,8 +59,14 @@ async function extractRaw(surface: SurfaceConfig, root: string): Promise<RawTool
       return extractDjangoRoutes(root);
     case 'openapi':
       return extractOpenApiRoutes(root);
-    case 'graphql':
-      return extractGraphqlSchema(root, surface.graphqlPath ?? '/graphql');
+    case 'graphql': {
+      // Schema-first SDL is authoritative; fall back to code-first (decorator-driven)
+      // extraction only when no SDL tools are found, so a schema-first project is
+      // unaffected.
+      const graphqlPath = surface.graphqlPath ?? '/graphql';
+      const sdlTools = extractGraphqlSchema(root, graphqlPath);
+      return sdlTools.length > 0 ? sdlTools : extractGraphqlCodeFirst(root, graphqlPath);
+    }
     case 'vite':
       return [];
   }
