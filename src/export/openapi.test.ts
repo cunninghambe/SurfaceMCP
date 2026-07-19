@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { buildOpenApiDocument } from './openapi.js';
+import { buildOpenApiDocument, buildOpenApiResult } from './openapi.js';
 import type { ToolMeta } from '../types.js';
 
 function tool(partial: Partial<ToolMeta> & Pick<ToolMeta, 'method' | 'path'>): ToolMeta {
@@ -57,5 +57,20 @@ describe('buildOpenApiDocument', () => {
     const responses = op.responses as { '200': { content?: { 'application/json': { schema: unknown } } } };
     expect(responses['200'].content?.['application/json'].schema).toEqual({ type: 'object', properties: { ok: { type: 'boolean' } } });
     expect(op['x-surfacemcp-tool-id']).toBe('deadbe');
+  });
+});
+
+describe('buildOpenApiResult — GraphQL tools', () => {
+  it('skips GraphQL tools (they share one endpoint) and reports the count', () => {
+    const rest = tool({ method: 'GET', path: '/rest', name: 'get_rest' });
+    const gql = {
+      ...tool({ method: 'POST', path: '/graphql', name: 'query_user' }),
+      graphql: { operationType: 'query' as const, field: 'user', args: [] },
+    };
+    const { document, skippedGraphql } = buildOpenApiResult([rest, gql], { title: 'API', version: '1.0.0' });
+    expect(skippedGraphql).toBe(1);
+    const paths = document.paths as Record<string, unknown>;
+    expect(paths).toHaveProperty('/rest');
+    expect(paths).not.toHaveProperty('/graphql'); // GraphQL op omitted, not collapsed
   });
 });

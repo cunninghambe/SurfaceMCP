@@ -2,7 +2,6 @@ import { z } from 'zod';
 import { zodToJsonSchema } from 'zod-to-json-schema';
 import { readFileSync, existsSync } from 'node:fs';
 import { resolve } from 'node:path';
-import type { Config } from './types.js';
 import { log } from './log.js';
 
 const SuccessCheckSchema = z.discriminatedUnion('kind', [
@@ -124,6 +123,16 @@ const ConfigSchema = z
       });
     }
   });
+
+// The config types are INFERRED from the Zod schemas above, making the schema the
+// single source of truth. A field present in a type but missing from its schema
+// (the `bodyValidatorNames` drift) is now structurally impossible. types.ts
+// re-exports these.
+export type SuccessCheck = z.infer<typeof SuccessCheckSchema>;
+export type AuthConfig = z.infer<typeof AuthConfigSchema>;
+export type RoleConfig = z.infer<typeof RoleConfigSchema>;
+export type SurfaceConfig = z.infer<typeof SurfaceConfigSchema>;
+export type Config = z.infer<typeof ConfigSchema>;
 
 /**
  * Find every role credential whose value is an inline literal rather than a

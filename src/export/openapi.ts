@@ -35,10 +35,31 @@ function toOpenApiPath(path: string): string {
   return path.replace(/:([A-Za-z_]\w*)/g, '{$1}');
 }
 
+export type OpenApiExportResult = {
+  document: Record<string, unknown>;
+  /** Count of GraphQL tools skipped (they don't map to REST paths). */
+  skippedGraphql: number;
+};
+
 export function buildOpenApiDocument(tools: ToolMeta[], opts: OpenApiExportOptions): Record<string, unknown> {
+  return buildOpenApiResult(tools, opts).document;
+}
+
+/**
+ * Like buildOpenApiDocument but also reports how many tools were skipped. GraphQL
+ * tools all share `POST <graphqlPath>` with the operation in the body, so they
+ * cannot be represented as distinct REST paths — they are omitted rather than
+ * collapsed onto one path (which would silently drop all but one operation).
+ */
+export function buildOpenApiResult(tools: ToolMeta[], opts: OpenApiExportOptions): OpenApiExportResult {
   const paths: Record<string, Record<string, unknown>> = {};
+  let skippedGraphql = 0;
 
   for (const tool of tools) {
+    if (tool.graphql) {
+      skippedGraphql++;
+      continue;
+    }
     const openApiPath = toOpenApiPath(tool.path);
     const pathParamNames = new Set(extractPathParams(tool.path).map((p) => p.name));
     const inputProps = tool.inputSchema?.properties ?? {};
@@ -89,7 +110,7 @@ export function buildOpenApiDocument(tools: ToolMeta[], opts: OpenApiExportOptio
     paths[openApiPath]![tool.method.toLowerCase()] = operation;
   }
 
-  return {
+  const document = {
     openapi: '3.1.0',
     info: {
       title: opts.title,
@@ -99,4 +120,5 @@ export function buildOpenApiDocument(tools: ToolMeta[], opts: OpenApiExportOptio
     ...(opts.baseUrl ? { servers: [{ url: opts.baseUrl }] } : {}),
     paths,
   };
+  return { document, skippedGraphql };
 }
