@@ -8,6 +8,10 @@
     "DELETE /items/:id",
     "GET /health",
     "GET /ping",
-    "POST /ping"
+    "POST /ping",
+    "POST /orders",
+    "PATCH /orders/:id/status",
+    "POST /orders/categories",
+    "POST /orders/graph"
   ]
 }
