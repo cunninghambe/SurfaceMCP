@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { resolve, sep } from 'node:path';
-import { resolveContainedPath } from './path-guard.js';
+import { resolveContainedPath, isContainedPath } from './path-guard.js';
 
 const ROOT = resolve('/project/app');
 
@@ -56,5 +56,19 @@ describe('resolveContainedPath', () => {
     // '/project/app-secrets' shares the '/project/app' string prefix but is not inside it.
     const r = resolveContainedPath(ROOT, '../app-secrets/file.tsx');
     expect(r.ok).toBe(false);
+  });
+});
+
+describe('isContainedPath', () => {
+  it('accepts the root itself and paths beneath it', () => {
+    expect(isContainedPath(ROOT, ROOT)).toBe(true);
+    expect(isContainedPath(ROOT, resolve(ROOT, 'src/index.ts'))).toBe(true);
+    expect(isContainedPath(ROOT, resolve(ROOT, 'a/../b/c.ts'))).toBe(true);
+  });
+
+  it('rejects escapes and shared-prefix siblings', () => {
+    expect(isContainedPath(ROOT, resolve(ROOT, '..'))).toBe(false);
+    expect(isContainedPath(ROOT, resolve(ROOT, '../app-secrets/file.ts'))).toBe(false);
+    expect(isContainedPath(ROOT, resolve(ROOT, '../../etc/passwd'))).toBe(false);
   });
 });

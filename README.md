@@ -138,7 +138,14 @@ The MCP endpoint binds to `127.0.0.1` and proxies calls to the configured `baseU
 
 Credential values are **redacted by default**: `surface_describe_auth` returns field names and per-field shape metadata only. Pass `revealSecrets: true` (loopback + token gated) to include plaintext. `surface_call` does not follow redirects (no SSRF pivot), never returns the target's `set-cookie`, and validates any caller-supplied `extraCookie`; `surface_routes_for_page` confines file reads to the project root. Inline literal credentials (values not using `$env:` indirection) are flagged by `surfacemcp doctor` and at config load.
 
-See [SPEC.md](SPEC.md) for the base threat model and [SPEC_SECURITY_HARDENING.md](SPEC_SECURITY_HARDENING.md) for this hardening pass.
+### The target project is trusted input
+
+Discovery reads — and in one case *runs* — code from the target project. Point SurfaceMCP at a repo you trust:
+
+- **Schema introspection may execute target code.** For the `nextjs` and `express` stacks, resolving a zod schema can `await import(...)` a file from the target project, which executes that module (and its imports) inside the SurfaceMCP process, at every extraction and every file-watcher regen. Imports are confined to the surface root (realpath-checked, so symlinks pointing out are refused) and each executed module is named once in the log at `warn`. It is **not** a sandbox. Set `schemaIntrospection.dynamicImport: false` on a surface to disable it and fall back to static AST parsing; schemas that are only resolvable through a re-export then drop to a lower `inputSchemaConfidence`. **Default is `true` — unchanged behaviour.**
+- **GraphQL operations are grammar-checked.** GraphQL tool descriptors are derived from the target's SDL or from decorator string literals (`@Query({ name })`, `@Arg('…')`). Every field name, argument name, argument type and selection set is validated against the GraphQL grammar before it is concatenated into an operation, so a crafted literal cannot splice a second operation into a call made with an authenticated role session. Rejected operations/arguments are skipped at discovery with a `warn`; a bad descriptor that somehow reaches call time fails with `bad_graphql_descriptor`.
+
+See [SPEC.md](SPEC.md) for the base threat model and [SPEC_SECURITY_HARDENING.md](SPEC_SECURITY_HARDENING.md) for both hardening passes.
 
 ## Development
 

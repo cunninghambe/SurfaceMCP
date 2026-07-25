@@ -2,6 +2,7 @@ import { readdirSync, existsSync } from 'node:fs';
 import { resolve, relative } from 'node:path';
 import type { RawToolMeta } from '../../types.js';
 import { tryImportZodSchema, extractManualValidationSchemaFromFile } from './schemas.js';
+import type { DynamicImportPolicy } from '../dynamic-import.js';
 import { toolId, pathToToolName, methodToSideEffect } from '../common.js';
 
 const HTTP_METHODS = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD', 'OPTIONS'] as const;
@@ -43,7 +44,8 @@ async function extractMethodsFromFile(
   filePath: string,
   apiPath: string,
   sourceRoot: string,
-  zodAlias?: string
+  zodAlias?: string,
+  dynamicImport?: DynamicImportPolicy
 ): Promise<RawToolMeta[]> {
   const tools: RawToolMeta[] = [];
 
@@ -74,7 +76,7 @@ async function extractMethodsFromFile(
     detectedMethods.push('GET', 'POST');
   }
 
-  const zodResult = await tryImportZodSchema(filePath, zodAlias);
+  const zodResult = await tryImportZodSchema(filePath, zodAlias, dynamicImport);
   const { schema, confidence } =
     zodResult.confidence !== 'unknown'
       ? zodResult
@@ -120,9 +122,12 @@ function walkDir(dir: string, files: string[] = []): string[] {
 
 export async function extractNextjsRoutes(
   root: string,
-  zodAlias?: string
+  zodAlias?: string,
+  /** #target-code-exec: `false` disables the schema-introspection dynamic import. */
+  allowDynamicImport = true
 ): Promise<RawToolMeta[]> {
   const rawTools: RawToolMeta[] = [];
+  const dynamicImport: DynamicImportPolicy = { root, enabled: allowDynamicImport };
 
   // App Router: app/api/**
   const appApiDir = resolve(root, 'app', 'api');
@@ -132,7 +137,7 @@ export async function extractNextjsRoutes(
     const posixFile = file.replace(/\\/g, '/'); // walkDir yields OS-native separators; match on posix
     if (!posixFile.endsWith('/route.ts') && !posixFile.endsWith('/route.js')) continue;
     const apiPath = filePathToApiPath(file, appApiDir);
-    const tools = await extractMethodsFromFile(file, apiPath, root, zodAlias);
+    const tools = await extractMethodsFromFile(file, apiPath, root, zodAlias, dynamicImport);
     rawTools.push(...tools);
   }
 
@@ -141,7 +146,7 @@ export async function extractNextjsRoutes(
   const pagesApiFiles = walkDir(pagesApiDir);
   for (const file of pagesApiFiles) {
     const apiPath = filePathToApiPath(file, pagesApiDir);
-    const tools = await extractMethodsFromFile(file, apiPath, root, zodAlias);
+    const tools = await extractMethodsFromFile(file, apiPath, root, zodAlias, dynamicImport);
     rawTools.push(...tools);
   }
 
@@ -152,7 +157,7 @@ export async function extractNextjsRoutes(
     const posixFile = file.replace(/\\/g, '/'); // walkDir yields OS-native separators; match on posix
     if (!posixFile.endsWith('/route.ts') && !posixFile.endsWith('/route.js')) continue;
     const apiPath = filePathToApiPath(file, srcAppApiDir);
-    const tools = await extractMethodsFromFile(file, apiPath, root, zodAlias);
+    const tools = await extractMethodsFromFile(file, apiPath, root, zodAlias, dynamicImport);
     rawTools.push(...tools);
   }
 
@@ -160,7 +165,7 @@ export async function extractNextjsRoutes(
   const srcPagesApiFiles = walkDir(srcPagesApiDir);
   for (const file of srcPagesApiFiles) {
     const apiPath = filePathToApiPath(file, srcPagesApiDir);
-    const tools = await extractMethodsFromFile(file, apiPath, root, zodAlias);
+    const tools = await extractMethodsFromFile(file, apiPath, root, zodAlias, dynamicImport);
     rawTools.push(...tools);
   }
 

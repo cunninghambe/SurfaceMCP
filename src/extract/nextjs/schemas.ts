@@ -2,6 +2,7 @@ import { Project, Node, SyntaxKind, type SourceFile, type IfStatement } from 'ts
 import { zodToJsonSchema } from 'zod-to-json-schema';
 import { type ZodSchema } from 'zod';
 import type { JsonSchema2020, InputSchemaConfidence } from '../../types.js';
+import { importTargetModule, type DynamicImportPolicy } from '../dynamic-import.js';
 
 type SchemaResult = {
   schema: JsonSchema2020;
@@ -500,16 +501,21 @@ function tryResolveZodSchemaInScope(
 }
 
 /**
- * Try to dynamically import a route file and extract its exported zod schema.
+ * Try to dynamically import a route file and extract its exported zod schema,
+ * falling back to static AST parsing.
+ *
+ * #target-code-exec: the import EXECUTES target-project code in this process. It
+ * is gated by {@link importTargetModule} (surface-root containment + the
+ * `schemaIntrospection.dynamicImport` opt-out) and is skipped entirely when no
+ * policy is supplied.
  */
 export async function tryImportZodSchema(
   filePath: string,
-  zodAlias = 'z'
+  zodAlias = 'z',
+  dynamicImport?: DynamicImportPolicy
 ): Promise<SchemaResult> {
-  try {
-    // Import the module at runtime and look for common schema export names
-    const mod = await import(filePath) as Record<string, unknown>;
-
+  const mod = await importTargetModule(filePath, dynamicImport, 'nextjs route schema');
+  if (mod) {
     const schemaNames = ['schema', 'bodySchema', 'inputSchema', 'requestSchema', 'Schema'];
     for (const name of schemaNames) {
       const candidate = mod[name];
@@ -518,8 +524,6 @@ export async function tryImportZodSchema(
         return { schema: jsonSchema, confidence: 'introspected' };
       }
     }
-  } catch {
-    // Dynamic import failed — fall back to AST parsing
   }
 
   try {

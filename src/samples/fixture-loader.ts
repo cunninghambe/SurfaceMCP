@@ -1,5 +1,6 @@
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { resolve, dirname } from 'node:path';
+import { resolveContainedPath } from '../server/path-guard.js';
 
 export type SampleInput = {
   source: string;
@@ -10,9 +11,14 @@ export type SampleInput = {
  * Find co-located test files for a route handler and extract literal input fixtures.
  */
 export function loadSampleInputs(sourceFile: string, root: string): SampleInput[] {
-  const absSource = resolve(root, sourceFile);
-  const dir = dirname(absSource);
   const samples: SampleInput[] = [];
+  // #path-traversal (defense in depth): `sourceFile` comes from the catalog, not
+  // from the MCP caller, and every extractor emits it root-relative. Enforce that
+  // invariant anyway so a future extractor bug can't turn `surface_sample_inputs`
+  // into an arbitrary-directory read.
+  const guard = resolveContainedPath(root, sourceFile);
+  if (!guard.ok) return samples;
+  const dir = dirname(guard.absPath);
 
   // Look for *.test.ts, *.spec.ts in the same directory
   let entries: string[] = [];

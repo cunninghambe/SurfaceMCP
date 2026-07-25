@@ -56,8 +56,16 @@ function parseUrlsFile(content: string): ParsedEntry[] {
   return entries;
 }
 
+/** Escape a target-derived string so it can be embedded in a RegExp as a literal. */
+function escapeRegExp(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
 function methodsForClass(className: string, viewsContent: string): string[] {
-  const re = new RegExp(`class\\s+${className}\\b[^:]*:`, 'm');
+  // The class name comes from the target's urls.py, so it can contain regex
+  // metacharacters — unescaped they either throw (crashing extraction) or build a
+  // pathological pattern over the whole views file. Embed it as a literal.
+  const re = new RegExp(`class\\s+${escapeRegExp(className)}\\b[^:]*:`, 'm');
   const m = re.exec(viewsContent);
   if (!m) return [];
   const after = viewsContent.slice(m.index + m[0].length);

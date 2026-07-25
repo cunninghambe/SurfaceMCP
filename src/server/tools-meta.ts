@@ -38,7 +38,11 @@ async function extractRaw(surface: SurfaceConfig, root: string): Promise<RawTool
   switch (surface.stack) {
     case 'nextjs': {
       const [routes, actions] = await Promise.all([
-        extractNextjsRoutes(root, surface.schemaIntrospection?.zodAlias),
+        extractNextjsRoutes(
+          root,
+          surface.schemaIntrospection?.zodAlias,
+          surface.schemaIntrospection?.dynamicImport
+        ),
         extractServerActions(root),
       ]);
       return [...routes, ...actions];
@@ -47,7 +51,8 @@ async function extractRaw(surface: SurfaceConfig, root: string): Promise<RawTool
       return extractExpressRoutes(
         root,
         surface.schemaIntrospection?.zodAlias,
-        surface.schemaIntrospection?.bodyValidatorNames
+        surface.schemaIntrospection?.bodyValidatorNames,
+        surface.schemaIntrospection?.dynamicImport
       );
     case 'fastify':
       return extractFastifyRoutes(root);

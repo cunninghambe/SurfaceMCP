@@ -99,6 +99,16 @@ const SurfaceConfigSchema = z.object({
       // present in the TS type + consumed at tools-meta, but missing here, so
       // .parse() silently dropped it. Keep in sync with SurfaceConfig in types.ts.
       bodyValidatorNames: z.array(z.string()).optional(),
+      /**
+       * #target-code-exec: when resolving a zod schema, the Next.js/Express
+       * extractors may `await import(...)` a file from the TARGET project, which
+       * EXECUTES that project's code inside the SurfaceMCP process (at every
+       * extraction and every file-watcher regen). Imports are confined to the
+       * surface root, but this is not a sandbox. Default `true` (unchanged
+       * behaviour); set `false` to fall back to static AST parsing only, which may
+       * lower `inputSchemaConfidence` for schemas resolved through a re-export.
+       */
+      dynamicImport: z.boolean().optional(),
     })
     .optional(),
   excludedRoutes: z.array(z.string()).optional(),

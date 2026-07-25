@@ -12,6 +12,21 @@ export type PathGuardResult =
  * otherwise). On success returns the absolute path, guaranteed to sit at or
  * under `root`.
  */
+/**
+ * True when `absPath` resolves to `root` itself or somewhere beneath it.
+ *
+ * Pure path arithmetic — it does NOT consult the filesystem, so callers that care
+ * about symlink escapes must realpath both sides before calling (see
+ * `src/extract/dynamic-import.ts`).
+ */
+export function isContainedPath(root: string, absPath: string): boolean {
+  const rootResolved = resolve(root);
+  const target = resolve(absPath);
+  if (target === rootResolved) return true;
+  const prefix = rootResolved.endsWith(sep) ? rootResolved : rootResolved + sep;
+  return target.startsWith(prefix);
+}
+
 export function resolveContainedPath(root: string, input: unknown): PathGuardResult {
   if (typeof input !== 'string' || input.length === 0) {
     return { ok: false, code: 'bad_path', message: 'Path must be a non-empty string' };

@@ -236,7 +236,20 @@ export async function executeCall(params: CallParams): Promise<SurfaceCallResult
       // GraphQL: the operation lives in the POST body as `{ query, variables }`, not
       // in the URL. Always POST to the endpoint path; the caller's input is variables.
       // Guarded strictly on `tool.graphql` so REST tools are unaffected.
-      fetchBody = buildGraphqlBody(params.tool.graphql, params.input);
+      //
+      // #gql-injection: buildGraphqlBody re-validates every descriptor fragment it
+      // concatenates and throws rather than emitting a spliced operation. Fail the
+      // call here instead of letting it escape as an unhandled rejection.
+      try {
+        fetchBody = buildGraphqlBody(params.tool.graphql, params.input);
+      } catch (err) {
+        return {
+          ok: false,
+          error: { code: 'bad_graphql_descriptor', message: String(err) },
+          durationMs: Date.now() - start,
+          revisionAtCall: params.currentRevision,
+        };
+      }
     } else if (['GET', 'HEAD', 'OPTIONS', 'DELETE'].includes(method)) {
       // Append query params for GET-like methods
       if (Object.keys(bodyInput).length > 0) {
