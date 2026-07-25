@@ -178,14 +178,35 @@ function registerMetaTools(
     async (args) => {
       const resolved = resolveTool(registry, { name: args.name, toolId: args.toolId, surface: args.surface });
       if ('error' in resolved) return toolError(resolved.error.code, resolved.error.message);
-      return toolOk({ ...resolved.tool });
+      // Surface a response schema learned from observed successful calls when the
+      // extractor couldn't determine one statically.
+      const learned = resolved.runtime.coverage?.learnedSchemaFor(resolved.tool.toolId);
+      return toolOk({
+        ...resolved.tool,
+        ...(learned && !resolved.tool.outputSchema ? { learnedOutputSchema: learned } : {}),
+      });
+    }
+  );
+
+  // surface_coverage — which of the discovered surface has actually been exercised
+  server.tool(
+    'surface_coverage',
+    'Report call coverage for a surface: per-tool call counts and statuses seen, which tools have never been called, and response schemas learned from successful calls. Use it to find the untested part of the surface.',
+    {
+      surface: z.string().optional().describe('Surface name (required in multi-surface configs)'),
+    },
+    async (args) => {
+      const rt = resolveRuntime(registry, args.surface);
+      if ('error' in rt) return toolError('surface_required', rt.error);
+      if (!rt.coverage) return toolError('not_available', 'Coverage tracking is not enabled for this surface.');
+      return toolOk({ surface: rt.surface.name, ...rt.coverage.snapshot(rt.catalog.tools) });
     }
   );
 
   // surface_call
   server.tool(
     'surface_call',
-    'Call a discovered route/action as a specified role.',
+    'Call a discovered route/action as a specified role. Rails: pass readOnly to refuse non-safe tools, or dryRun to get the exact request that would be sent (secrets masked) without sending it.',
     {
       name: z.string().optional(),
       toolId: z.string().optional(),
@@ -197,6 +218,14 @@ function registerMetaTools(
       pinRevision: z.number().int().optional(),
       /** #181: BugHunter cookie_endpoint session cookie to forward to the backend API. */
       extraCookie: z.string().optional(),
+      readOnly: z
+        .boolean()
+        .optional()
+        .describe('Refuse this call if the tool is not `safe` (mutating/external blocked).'),
+      dryRun: z
+        .boolean()
+        .optional()
+        .describe('Build the request and return it without sending. Credential headers are masked.'),
     },
     async (args) => {
       const resolved = resolveTool(registry, { name: args.name, toolId: args.toolId });
@@ -253,6 +282,12 @@ function registerMetaTools(
         currentRevision: runtime.catalog.revision,
         timeoutMs: args.timeoutMs,
         extraCookie: args.extraCookie,
+        // Rails: the surface config can force read-only; a caller may additionally
+        // opt in per call, but can never opt OUT of a config-enforced restriction.
+        readOnly: runtime.surface.rails?.readOnly === true || args.readOnly === true,
+        dryRun: args.dryRun === true,
+        limiter: runtime.limiter,
+        observer: runtime.coverage,
       });
       return toolOk(result);
     }
@@ -549,7 +584,7 @@ export async function createApp(
     for (const sName of registry.order) {
       const runtime = registry.surfaces.get(sName)!;
       if (runtime.state.kind !== 'ready') continue;
-      registerGeneratedTools(server, runtime.catalog, runtime.surface, runtime.roleMutex!, runtime.resolvedRoot);
+      registerGeneratedTools(server, runtime.catalog, runtime.surface, runtime.roleMutex!, runtime.resolvedRoot, runtime.limiter, runtime.coverage);
     }
 
     const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });

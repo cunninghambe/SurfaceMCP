@@ -114,6 +114,20 @@ const SurfaceConfigSchema = z.object({
   excludedRoutes: z.array(z.string()).optional(),
   externalIntegrations: z.array(z.string()).optional(),
   _suggestedExternalIntegrations: z.array(z.string()).optional(),
+  /**
+   * Safety rails for autonomous callers. All optional; omitted = current
+   * behaviour (no read-only restriction, unbounded rate/concurrency).
+   */
+  rails: z
+    .object({
+      /** Refuse every non-`safe` tool on this surface (callers cannot override). */
+      readOnly: z.boolean().optional(),
+      /** Max requests started per second against the target. */
+      requestsPerSecond: z.number().positive().optional(),
+      /** Max requests in flight against the target at once. */
+      maxConcurrent: z.number().int().positive().optional(),
+    })
+    .optional(),
 });
 
 const ConfigSchema = z

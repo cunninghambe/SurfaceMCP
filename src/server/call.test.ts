@@ -81,3 +81,52 @@ describe('executeCall path-param substitution', () => {
     expect(last.url).toBe(`/search?filter=${encodeURIComponent('{"a":1}')}`);
   });
 });
+
+describe('executeCall rails', () => {
+  it('readOnly refuses a mutating tool without issuing a request', async () => {
+    last = {};
+    const r = await executeCall({
+      tool: tool('POST', '/users'), role: 'anonymous', input: { a: 1 }, baseUrl,
+      projectName: 'test', auth: { kind: 'none' }, roleMutex, revision: 1,
+      currentRevision: 1, readOnly: true,
+    });
+    expect(r.ok).toBe(false);
+    expect(r.error?.code).toBe('read_only_blocked');
+    expect(last.url).toBeUndefined(); // server never hit
+  });
+
+  it('readOnly still permits a safe tool', async () => {
+    const r = await executeCall({
+      tool: tool('GET', '/users'), role: 'anonymous', input: {}, baseUrl,
+      projectName: 'test', auth: { kind: 'none' }, roleMutex, revision: 1,
+      currentRevision: 1, readOnly: true,
+    });
+    expect(r.ok).toBe(true);
+    expect(last.method).toBe('GET');
+  });
+
+  it('dryRun returns the resolved request and sends nothing', async () => {
+    last = {};
+    const r = await executeCall({
+      tool: tool('POST', '/users/:id/posts'), role: 'anonymous',
+      input: { id: '7', title: 'hello' }, baseUrl,
+      projectName: 'test', auth: { kind: 'none' }, roleMutex, revision: 1,
+      currentRevision: 1, dryRun: true,
+    });
+    expect(r.ok).toBe(true);
+    expect(last.url).toBeUndefined(); // nothing sent
+    expect(r.dryRun?.method).toBe('POST');
+    expect(r.dryRun?.url).toBe(`${baseUrl}/users/7/posts`); // path param substituted
+    expect(JSON.parse(r.dryRun?.body ?? '{}')).toEqual({ title: 'hello' }); // path param not duplicated
+  });
+
+  it('dryRun masks credential headers', async () => {
+    const r = await executeCall({
+      tool: tool('GET', '/x'), role: 'anonymous', input: {}, baseUrl,
+      projectName: 'test', auth: { kind: 'none' }, roleMutex, revision: 1,
+      currentRevision: 1, dryRun: true, extraCookie: 'session=supersecret',
+    });
+    expect(JSON.stringify(r.dryRun)).not.toContain('supersecret');
+    expect(r.dryRun?.headers.Cookie).toBe('<redacted>');
+  });
+});
