@@ -4,6 +4,7 @@ import { shouldAutoRelogin } from '../auth/refresh-policy.js';
 import { getApiKey } from '../auth/api-key.js';
 import { resolveCredentials } from '../env/indirection.js';
 import { substitutePathParams } from './path-params.js';
+import { isReadOnlyBlocked, redactHeaders, type CallLimiter } from './rails.js';
 import { buildGraphqlBody } from './graphql-request.js';
 import { log } from '../log.js';
 
@@ -26,6 +27,12 @@ type CallParams = {
   timeoutMs?: number;
   /** #181: caller-supplied cookie to merge into the Cookie header (overrides nothing; appended). */
   extraCookie?: string;
+  /** Rails: refuse any tool that isn't `safe` (no mutating/external calls). */
+  readOnly?: boolean;
+  /** Rails: build the request and return it WITHOUT sending. Secrets are masked. */
+  dryRun?: boolean;
+  /** Rails: per-surface rate/concurrency limiter. Omitted = unbounded. */
+  limiter?: CallLimiter;
 };
 
 function buildHeaders(
@@ -191,6 +198,21 @@ export async function executeCall(params: CallParams): Promise<SurfaceCallResult
     };
   }
 
+  // Rails: read-only mode refuses anything that isn't `safe`. Checked before the
+  // external guard so a read-only caller gets the clearer refusal, and before any
+  // session/login work so a blocked call has zero side effects.
+  if (isReadOnlyBlocked(params.tool, params.readOnly === true)) {
+    return {
+      ok: false,
+      error: {
+        code: 'read_only_blocked',
+        message: `Read-only mode: refusing '${params.tool.sideEffectClass}' tool ${params.tool.name}. Only 'safe' tools may be called.`,
+      },
+      durationMs: Date.now() - start,
+      revisionAtCall: params.currentRevision,
+    };
+  }
+
   // Check external call guard
   if (params.tool.sideEffectClass === 'external' && !params.allowExternal) {
     return {
@@ -268,45 +290,72 @@ export async function executeCall(params: CallParams): Promise<SurfaceCallResult
       fetchBody = JSON.stringify(bodyInput);
     }
 
-    const timeoutMs = params.timeoutMs ?? 30_000;
-    let response: Response;
-
-    try {
-      response = await fetch(fetchUrl, {
-        method,
-        headers,
-        body: fetchBody,
-        // #SSRF: never silently follow redirects — a 3xx to an attacker-controlled
-        // host would let the target pivot our authenticated session elsewhere.
-        // Surface the 3xx status + Location header to the caller instead.
-        redirect: 'manual',
-        signal: AbortSignal.timeout(timeoutMs),
-      });
-    } catch (err) {
+    // Rails: dryRun returns the fully-resolved request without issuing it. Placed
+    // after URL/body/header construction so the preview is exactly what would go
+    // out, and before any network work so it has zero side effects. Credential
+    // header values are masked — the caller sees that auth would be attached, but
+    // never the secret.
+    if (params.dryRun) {
       return {
-        ok: false,
-        error: { code: 'fetch_error', message: String(err) },
+        ok: true,
+        dryRun: {
+          method,
+          url: fetchUrl,
+          headers: redactHeaders(headers),
+          ...(fetchBody === undefined ? {} : { body: fetchBody }),
+        },
         durationMs: Date.now() - start,
         revisionAtCall: params.currentRevision,
       };
     }
 
-    const responseHeaders: Record<string, string> = {};
-    response.headers.forEach((value, key) => {
-      responseHeaders[key] = value;
-    });
+    const timeoutMs = params.timeoutMs ?? 30_000;
+    let response: Response;
 
-    const { body, truncated } = await readBodyWithLimit(response, STREAM_TIMEOUT_MS);
+    // Rails: hold a rate/concurrency slot for the whole request — including the
+    // body read — so `maxConcurrent` genuinely bounds in-flight load on the
+    // target rather than only the header round-trip.
+    const release = params.limiter ? await params.limiter.acquire() : undefined;
+    try {
+      try {
+        response = await fetch(fetchUrl, {
+          method,
+          headers,
+          body: fetchBody,
+          // #SSRF: never silently follow redirects — a 3xx to an attacker-controlled
+          // host would let the target pivot our authenticated session elsewhere.
+          // Surface the 3xx status + Location header to the caller instead.
+          redirect: 'manual',
+          signal: AbortSignal.timeout(timeoutMs),
+        });
+      } catch (err) {
+        return {
+          ok: false,
+          error: { code: 'fetch_error', message: String(err) },
+          durationMs: Date.now() - start,
+          revisionAtCall: params.currentRevision,
+        };
+      }
 
-    return {
-      ok: response.status >= 200 && response.status < 300,
-      status: response.status,
-      headers: responseHeaders,
-      body,
-      bodyTruncated: truncated || undefined,
-      durationMs: Date.now() - start,
-      revisionAtCall: params.currentRevision,
-    };
+      const responseHeaders: Record<string, string> = {};
+      response.headers.forEach((value, key) => {
+        responseHeaders[key] = value;
+      });
+
+      const { body, truncated } = await readBodyWithLimit(response, STREAM_TIMEOUT_MS);
+
+      return {
+        ok: response.status >= 200 && response.status < 300,
+        status: response.status,
+        headers: responseHeaders,
+        body,
+        bodyTruncated: truncated || undefined,
+        durationMs: Date.now() - start,
+        revisionAtCall: params.currentRevision,
+      };
+    } finally {
+      release?.();
+    }
   };
 
   let result = await makeRequest(session);

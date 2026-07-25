@@ -5,6 +5,7 @@ import type { RoleMutex } from '../auth/role-mutex.js';
 import { executeCall } from './call.js';
 import { jsonSchemaToZod } from './schema-to-zod.js';
 import { extractPathParams, withPathParams } from './path-params.js';
+import type { CallLimiter } from './rails.js';
 import { log } from '../log.js';
 
 export function registerGeneratedTools(
@@ -12,10 +13,11 @@ export function registerGeneratedTools(
   catalog: ToolCatalog,
   surface: SurfaceConfig,
   roleMutex: RoleMutex,
-  root: string
+  root: string,
+  limiter?: CallLimiter
 ): void {
   for (const tool of catalog.tools) {
-    registerOneTool(server, tool, catalog.revision, surface, roleMutex, root);
+    registerOneTool(server, tool, catalog.revision, surface, roleMutex, root, limiter);
   }
 }
 
@@ -25,7 +27,8 @@ function registerOneTool(
   revision: number,
   surface: SurfaceConfig,
   roleMutex: RoleMutex,
-  _root: string
+  _root: string,
+  limiter?: CallLimiter
 ): void {
   const pathParams = extractPathParams(tool.path);
   const effectiveSchema = withPathParams(tool.inputSchema, pathParams);
@@ -48,6 +51,11 @@ function registerOneTool(
       allowExternal: z.boolean().optional().describe('Allow external side-effect calls'),
       noAutoRelogin: z.boolean().optional().describe('Disable auto-relogin on 401'),
       pinRevision: z.number().int().optional().describe('Abort if catalog revision has changed'),
+      readOnly: z.boolean().optional().describe('Refuse this call unless the tool is `safe`'),
+      dryRun: z
+        .boolean()
+        .optional()
+        .describe('Return the request that would be sent (secrets masked) without sending it'),
     },
     async (args) => {
       try {
@@ -65,6 +73,10 @@ function registerOneTool(
           pinRevision: args.pinRevision,
           currentRevision: revision,
           timeoutMs: args.timeoutMs,
+          // Rails: config-enforced read-only cannot be overridden by the caller.
+          readOnly: surface.rails?.readOnly === true || args.readOnly === true,
+          dryRun: args.dryRun === true,
+          limiter,
         });
         return {
           content: [{ type: 'text' as const, text: JSON.stringify(result) }],

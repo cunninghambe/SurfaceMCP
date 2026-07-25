@@ -185,7 +185,7 @@ function registerMetaTools(
   // surface_call
   server.tool(
     'surface_call',
-    'Call a discovered route/action as a specified role.',
+    'Call a discovered route/action as a specified role. Rails: pass readOnly to refuse non-safe tools, or dryRun to get the exact request that would be sent (secrets masked) without sending it.',
     {
       name: z.string().optional(),
       toolId: z.string().optional(),
@@ -197,6 +197,14 @@ function registerMetaTools(
       pinRevision: z.number().int().optional(),
       /** #181: BugHunter cookie_endpoint session cookie to forward to the backend API. */
       extraCookie: z.string().optional(),
+      readOnly: z
+        .boolean()
+        .optional()
+        .describe('Refuse this call if the tool is not `safe` (mutating/external blocked).'),
+      dryRun: z
+        .boolean()
+        .optional()
+        .describe('Build the request and return it without sending. Credential headers are masked.'),
     },
     async (args) => {
       const resolved = resolveTool(registry, { name: args.name, toolId: args.toolId });
@@ -253,6 +261,11 @@ function registerMetaTools(
         currentRevision: runtime.catalog.revision,
         timeoutMs: args.timeoutMs,
         extraCookie: args.extraCookie,
+        // Rails: the surface config can force read-only; a caller may additionally
+        // opt in per call, but can never opt OUT of a config-enforced restriction.
+        readOnly: runtime.surface.rails?.readOnly === true || args.readOnly === true,
+        dryRun: args.dryRun === true,
+        limiter: runtime.limiter,
       });
       return toolOk(result);
     }
@@ -549,7 +562,7 @@ export async function createApp(
     for (const sName of registry.order) {
       const runtime = registry.surfaces.get(sName)!;
       if (runtime.state.kind !== 'ready') continue;
-      registerGeneratedTools(server, runtime.catalog, runtime.surface, runtime.roleMutex!, runtime.resolvedRoot);
+      registerGeneratedTools(server, runtime.catalog, runtime.surface, runtime.roleMutex!, runtime.resolvedRoot, runtime.limiter);
     }
 
     const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });

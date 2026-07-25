@@ -234,6 +234,16 @@ export type SurfaceCallResult = {
   error?: { code: string; message: string };
   durationMs: number;
   revisionAtCall: number;
+  /**
+   * Present only for `dryRun` calls: the request that WOULD have been sent, with
+   * credential-bearing header values masked. No request was issued.
+   */
+  dryRun?: {
+    method: string;
+    url: string;
+    headers: Record<string, string>;
+    body?: string;
+  };
 };
 
 export type ProbeResult = {
@@ -371,6 +381,8 @@ export type SurfaceRuntime = {
   navigationCatalog: NavigationCatalog;
   roleMutex: import('./auth/role-mutex.js').RoleMutex | undefined;
   watcher?: { close: () => Promise<void> };
+  /** Per-surface rate/concurrency limiter for outbound calls (rails). */
+  limiter?: import('./server/rails.js').CallLimiter;
 };
 
 export type SurfaceRegistry = {
