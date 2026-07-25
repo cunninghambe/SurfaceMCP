@@ -47,5 +47,14 @@ describe('extractOpenApiRoutes — outputSchema population', () => {
   it('leaves outputSchema undefined when the response has no schema', () => {
     const del = tools.find((t) => t.method === 'DELETE');
     expect(del?.outputSchema).toBeUndefined();
+    expect(del?.outputSchemaConfidence).toBeUndefined();
+  });
+
+  it('marks a spec-declared response schema introspected', () => {
+    for (const tool of tools) {
+      expect(tool.outputSchema ? tool.outputSchemaConfidence : undefined).toBe(
+        tool.outputSchema ? 'introspected' : undefined
+      );
+    }
   });
 });

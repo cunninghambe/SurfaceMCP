@@ -86,6 +86,13 @@ describe('code-first graphql extraction (type-graphql)', () => {
     expect(item?.properties?.ratings?.items?.properties?.stars).toMatchObject({ type: 'integer' });
   });
 
+  it('marks the decorator-derived outputSchema inferred, matching its input confidence', () => {
+    for (const tool of extractGraphqlCodeFirst(root, '/graphql')) {
+      if (!tool.outputSchema) continue;
+      expect(tool.outputSchemaConfidence, tool.name).toBe('inferred');
+    }
+  });
+
   it('normalizes sourceFile to posix separators and points at the resolver', () => {
     const tools = extractGraphqlCodeFirst(root, '/graphql');
     for (const t of tools) {

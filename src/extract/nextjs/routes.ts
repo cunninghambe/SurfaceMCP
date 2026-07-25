@@ -1,9 +1,12 @@
 import { readdirSync, existsSync } from 'node:fs';
 import { resolve, relative } from 'node:path';
+import { Project } from 'ts-morph';
 import type { RawToolMeta } from '../../types.js';
 import { tryImportZodSchema, extractManualValidationSchemaFromFile } from './schemas.js';
 import type { DynamicImportPolicy } from '../dynamic-import.js';
+import { resolveNextResponseSchemas, type ResponseTypeResult } from './response-type.js';
 import { toolId, pathToToolName, methodToSideEffect } from '../common.js';
+import { indexSourceFiles } from '../ts-type-schema.js';
 
 const HTTP_METHODS = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD', 'OPTIONS'] as const;
 type HttpMethod = typeof HTTP_METHODS[number];
@@ -40,10 +43,30 @@ function filePathToApiPath(filePath: string, apiRootRelative: string): string {
   return path || '/';
 }
 
+/**
+ * Response schemas for one route file. Parsing is scoped to the single file: a
+ * response type imported from elsewhere won't resolve and is reported as no
+ * schema rather than a wrong one. Failures degrade to `{}` — response typing
+ * must never break route discovery.
+ */
+function responseSchemasForFile(
+  project: Project,
+  filePath: string
+): { perMethod: Map<string, ResponseTypeResult>; fallback: ResponseTypeResult } {
+  try {
+    const sf = project.getSourceFile(filePath) ?? project.addSourceFileAtPath(filePath);
+    const ctx = indexSourceFiles([sf], { includeShapes: true });
+    return resolveNextResponseSchemas(sf, ctx);
+  } catch {
+    return { perMethod: new Map(), fallback: {} };
+  }
+}
+
 async function extractMethodsFromFile(
   filePath: string,
   apiPath: string,
   sourceRoot: string,
+  project: Project,
   zodAlias?: string,
   dynamicImport?: DynamicImportPolicy
 ): Promise<RawToolMeta[]> {
@@ -82,6 +105,7 @@ async function extractMethodsFromFile(
       ? zodResult
       : await extractManualValidationSchemaFromFile(filePath);
   const sourceFile = relative(sourceRoot, filePath);
+  const { perMethod, fallback } = responseSchemasForFile(project, filePath);
 
   // Find approximate source line for the handler
   const lines = content.split('\n');
@@ -89,6 +113,8 @@ async function extractMethodsFromFile(
   for (const method of detectedMethods) {
     const lineIdx = lines.findIndex((l) => new RegExp(`function\\s+${method}\\s*\\(`).test(l));
     const sourceLine = lineIdx >= 0 ? lineIdx + 1 : 1;
+    // App Router: per-verb export. Pages Router: one handler for every verb.
+    const output = perMethod.get(method) ?? fallback;
 
     tools.push({
       name: '', // filled in by dedup
@@ -97,6 +123,9 @@ async function extractMethodsFromFile(
       path: apiPath,
       inputSchema: schema,
       inputSchemaConfidence: confidence,
+      ...(output.outputSchema
+        ? { outputSchema: output.outputSchema, outputSchemaConfidence: output.outputSchemaConfidence }
+        : {}),
       sideEffectClass: methodToSideEffect(method),
       sourceFile,
       sourceLine,
@@ -129,6 +158,13 @@ export async function extractNextjsRoutes(
   const rawTools: RawToolMeta[] = [];
   const dynamicImport: DynamicImportPolicy = { root, enabled: allowDynamicImport };
 
+  // One ts-morph Project shared by every route file, used only for response
+  // typing; input-schema recovery keeps its own (dynamic-import) path.
+  const project = new Project({
+    useInMemoryFileSystem: false,
+    skipFileDependencyResolution: true,
+  });
+
   // App Router: app/api/**
   const appApiDir = resolve(root, 'app', 'api');
   const appApiFiles = walkDir(appApiDir);
@@ -137,7 +173,7 @@ export async function extractNextjsRoutes(
     const posixFile = file.replace(/\\/g, '/'); // walkDir yields OS-native separators; match on posix
     if (!posixFile.endsWith('/route.ts') && !posixFile.endsWith('/route.js')) continue;
     const apiPath = filePathToApiPath(file, appApiDir);
-    const tools = await extractMethodsFromFile(file, apiPath, root, zodAlias, dynamicImport);
+    const tools = await extractMethodsFromFile(file, apiPath, root, project, zodAlias, dynamicImport);
     rawTools.push(...tools);
   }
 
@@ -146,7 +182,7 @@ export async function extractNextjsRoutes(
   const pagesApiFiles = walkDir(pagesApiDir);
   for (const file of pagesApiFiles) {
     const apiPath = filePathToApiPath(file, pagesApiDir);
-    const tools = await extractMethodsFromFile(file, apiPath, root, zodAlias, dynamicImport);
+    const tools = await extractMethodsFromFile(file, apiPath, root, project, zodAlias, dynamicImport);
     rawTools.push(...tools);
   }
 
@@ -157,7 +193,7 @@ export async function extractNextjsRoutes(
     const posixFile = file.replace(/\\/g, '/'); // walkDir yields OS-native separators; match on posix
     if (!posixFile.endsWith('/route.ts') && !posixFile.endsWith('/route.js')) continue;
     const apiPath = filePathToApiPath(file, srcAppApiDir);
-    const tools = await extractMethodsFromFile(file, apiPath, root, zodAlias, dynamicImport);
+    const tools = await extractMethodsFromFile(file, apiPath, root, project, zodAlias, dynamicImport);
     rawTools.push(...tools);
   }
 
@@ -165,7 +201,7 @@ export async function extractNextjsRoutes(
   const srcPagesApiFiles = walkDir(srcPagesApiDir);
   for (const file of srcPagesApiFiles) {
     const apiPath = filePathToApiPath(file, srcPagesApiDir);
-    const tools = await extractMethodsFromFile(file, apiPath, root, zodAlias, dynamicImport);
+    const tools = await extractMethodsFromFile(file, apiPath, root, project, zodAlias, dynamicImport);
     rawTools.push(...tools);
   }
 

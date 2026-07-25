@@ -447,7 +447,8 @@ export function extractGraphqlCodeFirst(root: string, graphqlPath = '/graphql'):
           // Derived from TS types + decorator options (heuristic), not an authoritative
           // SDL — hence `inferred` rather than schema-first's `introspected`.
           inputSchemaConfidence: 'inferred',
-          ...(outputSchema ? { outputSchema } : {}),
+          // Same provenance as the input: TS types + decorator options, not SDL.
+          ...(outputSchema ? { outputSchema, outputSchemaConfidence: 'inferred' as const } : {}),
           sideEffectClass: op.operationType === 'query' ? 'safe' : 'mutating',
           sourceFile,
           sourceLine: op.decorator.getStartLineNumber(),

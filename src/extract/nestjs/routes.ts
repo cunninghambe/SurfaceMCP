@@ -2,18 +2,26 @@ import { readdirSync, existsSync } from 'node:fs';
 import { resolve, relative } from 'node:path';
 import {
   Project,
-  SyntaxKind,
   Node,
-  type ClassDeclaration,
   type Decorator,
-  type EnumDeclaration,
-  type EnumMember,
   type MethodDeclaration,
   type ParameterDeclaration,
-  type PropertyDeclaration,
 } from 'ts-morph';
-import type { RawToolMeta, JsonSchema2020, InputSchemaConfidence } from '../../types.js';
+import type {
+  RawToolMeta,
+  JsonSchema2020,
+  InputSchemaConfidence,
+  OutputSchemaConfidence,
+} from '../../types.js';
 import { toolId, pathToToolName, methodToSideEffect } from '../common.js';
+import {
+  buildTypeIndex,
+  declarationToSchema,
+  isInformativeSchema,
+  schemaForTypeText,
+  unwrapAsyncType,
+  type TypeIndex,
+} from '../ts-type-schema.js';
 
 const UNKNOWN_SCHEMA: JsonSchema2020 = { type: 'object', additionalProperties: true };
 
@@ -37,6 +45,8 @@ type RouteRecord = {
   path: string;
   inputSchema: JsonSchema2020;
   inputSchemaConfidence: InputSchemaConfidence;
+  outputSchema?: JsonSchema2020;
+  outputSchemaConfidence?: OutputSchemaConfidence;
   sourceFile: string;
   sourceLine: number;
 };
@@ -77,303 +87,6 @@ function composeRoute(prefix: string, sub: string): string {
   return `/${parts.join('/')}`;
 }
 
-/**
- * Introspection covers (per DTO property):
- *  - primitives: string / number / boolean / integer (`@IsInt`), with `@IsEmail`
- *    and `@IsUUID` string formats;
- *  - arrays: `tags: string[]`, `Array<T>`, or `@IsArray()` + `@Is*({ each: true })`
- *    -> `{ type: 'array', items: {...} }` (items may themselves be a nested DTO);
- *  - nested DTO-typed properties: inlined recursively, bounded by MAX_DTO_DEPTH
- *    and guarded against cycles (a DTO seen earlier on the current resolution
- *    path degrades to `{ type: 'object' }` instead of recursing forever);
- *  - enums: `@IsEnum(E)` and/or a property typed by a resolvable TS enum
- *    -> `{ enum: [...values] }` (+ `type` when the members are uniform);
- *  - numeric / length constraints: `@Min`/`@Max` -> `minimum`/`maximum`,
- *    `@MinLength`/`@MaxLength` -> `minLength`/`maxLength`,
- *    `@IsPositive`/`@IsNegative` -> `exclusiveMinimum`/`exclusiveMaximum: 0`.
- * Still unsupported (degrade to an open `{}` or best-available type, never throw):
- *  union / intersection / generic (non-array) types, tuple types, index
- *  signatures, `Record<...>`/map-shaped props, and `@IsEnum` over an inline
- *  object literal (only named TS enums resolve).
- */
-
-/** Hard ceiling on nested-DTO expansion; also the cycle-guard backstop. */
-const MAX_DTO_DEPTH = 5;
-
-/** Shared lookup tables for a single extraction pass. */
-type IntrospectCtx = {
-  dtoIndex: Map<string, ClassDeclaration>;
-  enumIndex: Map<string, EnumDeclaration>;
-};
-
-/** Map a TypeScript type-node text to a JSON Schema primitive type, if recognizable. */
-function tsTypeToJson(typeText: string | undefined): string | null {
-  switch (typeText) {
-    case 'string':
-      return 'string';
-    case 'number':
-      return 'number';
-    case 'boolean':
-      return 'boolean';
-    default:
-      return null;
-  }
-}
-
-/**
- * If `typeText` is an array type (`T[]`, `Array<T>`, `ReadonlyArray<T>`), return
- * the element type text; otherwise null. Text-based so it is stable across OSes
- * and needs no type-checker.
- */
-function arrayElementText(typeText: string | undefined): string | null {
-  if (!typeText) return null;
-  const t = typeText.trim();
-  const bracket = /^(.+)\[\]$/.exec(t);
-  if (bracket) return bracket[1].trim();
-  const generic = /^(?:Readonly)?Array<(.+)>$/.exec(t);
-  if (generic) return generic[1].trim();
-  return null;
-}
-
-/**
- * class-validator decorator -> a JSON Schema refinement. Covers the common
- * primitive validators; unrecognized decorators are ignored (best-effort).
- */
-function validatorRefinement(name: string): Partial<JsonSchema2020> | null {
-  switch (name) {
-    case 'IsString':
-      return { type: 'string' };
-    case 'IsInt':
-      return { type: 'integer' };
-    case 'IsNumber':
-      return { type: 'number' };
-    case 'IsBoolean':
-      return { type: 'boolean' };
-    case 'IsEmail':
-      return { type: 'string', format: 'email' };
-    case 'IsUUID':
-      return { type: 'string', format: 'uuid' };
-    default:
-      return null;
-  }
-}
-
-/** First numeric argument of a decorator (`@Min(3)` -> 3, `@Min(-5)` -> -5), else null. */
-function firstNumericArg(dec: Decorator): number | null {
-  const arg = dec.getArguments()[0];
-  if (!arg) return null;
-  const n = Number(arg.getText());
-  return Number.isFinite(n) ? n : null;
-}
-
-/** True when a decorator carries a `{ each: true }` option (per-element validation). */
-function decoratorHasEach(dec: Decorator): boolean {
-  for (const arg of dec.getArguments()) {
-    if (!Node.isObjectLiteralExpression(arg)) continue;
-    const prop = arg.getProperty('each');
-    if (prop && Node.isPropertyAssignment(prop)) {
-      if (prop.getInitializer()?.getText() === 'true') return true;
-    }
-  }
-  return false;
-}
-
-/** Resolve a single enum member's literal value, falling back to its computed value / name. */
-function enumMemberValue(member: EnumMember): string | number {
-  const init = member.getInitializer();
-  if (init) {
-    if (Node.isStringLiteral(init) || Node.isNoSubstitutionTemplateLiteral(init)) {
-      return init.getLiteralValue();
-    }
-    if (Node.isNumericLiteral(init)) return Number(init.getLiteralValue());
-    if (Node.isPrefixUnaryExpression(init)) {
-      const n = Number(init.getText());
-      if (Number.isFinite(n)) return n;
-    }
-  }
-  const computed = member.getValue();
-  if (typeof computed === 'string' || typeof computed === 'number') return computed;
-  // Un-computable member (e.g. references an external const): fall back to its name.
-  return member.getName();
-}
-
-/** A resolvable TS enum -> `{ enum: [...values] }`, plus `type` when members are uniform. */
-function enumToSchema(en: EnumDeclaration): JsonSchema2020 {
-  const values = en.getMembers().map(enumMemberValue);
-  if (values.length === 0) return { type: 'object' };
-  const schema: JsonSchema2020 = { enum: values };
-  const allString = values.every((v) => typeof v === 'string');
-  const allNumber = values.every((v) => typeof v === 'number');
-  if (allString) schema.type = 'string';
-  else if (allNumber) schema.type = 'number';
-  return schema;
-}
-
-/** `@IsEnum(SomeEnum)` -> the enum's schema, when the argument names a resolvable TS enum. */
-function enumFromDecorator(dec: Decorator, ctx: IntrospectCtx): JsonSchema2020 | null {
-  const arg = dec.getArguments()[0];
-  if (!arg) return null;
-  const name = bareTypeName(arg.getText());
-  const en = name ? ctx.enumIndex.get(name) : undefined;
-  return en ? enumToSchema(en) : null;
-}
-
-/**
- * Expand a nested DTO reference by name, honoring the depth ceiling and cycle
- * guard. `visited` is the chain of DTO names already being expanded on the
- * current path; re-encountering one (or exceeding MAX_DTO_DEPTH) degrades to an
- * open object rather than recursing forever.
- */
-function resolveDtoRef(
-  name: string,
-  ctx: IntrospectCtx,
-  depth: number,
-  visited: Set<string>
-): JsonSchema2020 {
-  if (depth + 1 > MAX_DTO_DEPTH || visited.has(name)) return { type: 'object' };
-  const cls = ctx.dtoIndex.get(name);
-  if (!cls) return { type: 'object' };
-  const nested = dtoToSchema(cls, ctx, depth + 1, new Set([...visited, name]));
-  return nested ?? { type: 'object' };
-}
-
-/** Schema for a bare (non-array) type: primitive, resolvable enum, nested DTO, or open `{}`. */
-function schemaForBaseType(
-  typeText: string | undefined,
-  ctx: IntrospectCtx,
-  depth: number,
-  visited: Set<string>
-): JsonSchema2020 {
-  const prim = tsTypeToJson(typeText);
-  if (prim) return { type: prim };
-  const name = bareTypeName(typeText);
-  if (name && ctx.enumIndex.has(name)) return enumToSchema(ctx.enumIndex.get(name)!);
-  if (name && ctx.dtoIndex.has(name)) return resolveDtoRef(name, ctx, depth, visited);
-  return {};
-}
-
-/** Schema for a type text that may itself be an array; wraps `schemaForBaseType`. */
-function schemaForTypeText(
-  typeText: string | undefined,
-  ctx: IntrospectCtx,
-  depth: number,
-  visited: Set<string>
-): JsonSchema2020 {
-  const elem = arrayElementText(typeText);
-  if (elem !== null) {
-    return { type: 'array', items: schemaForBaseType(elem, ctx, depth, visited) };
-  }
-  return schemaForBaseType(typeText, ctx, depth, visited);
-}
-
-/** Apply one class-validator decorator's refinement onto `target` in place. */
-function applyDecorator(
-  target: JsonSchema2020,
-  dec: Decorator,
-  ctx: IntrospectCtx
-): void {
-  const name = dec.getName();
-
-  const refinement = validatorRefinement(name);
-  if (refinement) {
-    Object.assign(target, refinement);
-    return;
-  }
-  if (name === 'IsEnum') {
-    const enumSchema = enumFromDecorator(dec, ctx);
-    if (enumSchema) Object.assign(target, enumSchema);
-    return;
-  }
-
-  const n = firstNumericArg(dec);
-  switch (name) {
-    case 'Min':
-      if (n !== null) target.minimum = n;
-      return;
-    case 'Max':
-      if (n !== null) target.maximum = n;
-      return;
-    case 'MinLength':
-      if (n !== null) target.minLength = n;
-      return;
-    case 'MaxLength':
-      if (n !== null) target.maxLength = n;
-      return;
-    case 'IsPositive':
-      target.exclusiveMinimum = 0;
-      return;
-    case 'IsNegative':
-      target.exclusiveMaximum = 0;
-      return;
-  }
-}
-
-/** Build the JSON Schema for one DTO property from its TS type + class-validator decorators. */
-function propertySchema(
-  prop: PropertyDeclaration,
-  ctx: IntrospectCtx,
-  depth: number,
-  visited: Set<string>
-): JsonSchema2020 {
-  const decorators = prop.getDecorators();
-  const typeText = prop.getTypeNode()?.getText();
-  const elem = arrayElementText(typeText);
-  const hasIsArray = decorators.some((d) => d.getName() === 'IsArray');
-
-  // Array property: from `T[]`/`Array<T>` and/or `@IsArray()`. Item schema comes
-  // from the element type; `@Is*({ each: true })` decorators refine each item.
-  if (elem !== null || hasIsArray) {
-    const items: JsonSchema2020 =
-      elem !== null ? schemaForBaseType(elem, ctx, depth, visited) : {};
-    for (const dec of decorators) {
-      if (decoratorHasEach(dec)) applyDecorator(items, dec, ctx);
-    }
-    return { type: 'array', items };
-  }
-
-  // Scalar / enum / nested-DTO property.
-  const schema = schemaForBaseType(typeText, ctx, depth, visited);
-  for (const dec of decorators) {
-    if (decoratorHasEach(dec)) continue; // per-element decorators don't refine a scalar
-    applyDecorator(schema, dec, ctx);
-  }
-  return schema;
-}
-
-/** True when a property is optional (`name?: string` or `@IsOptional()`). */
-function isOptionalProperty(prop: PropertyDeclaration): boolean {
-  if (prop.hasQuestionToken()) return true;
-  return prop.getDecorators().some((d) => d.getName() === 'IsOptional');
-}
-
-/**
- * Introspect a DTO class into a JSON Schema object, recursing into nested DTOs
- * (depth-bounded, cycle-guarded via `visited`). Returns null when the class has
- * no usable properties so the caller can fall back to the unknown schema.
- */
-function dtoToSchema(
-  cls: ClassDeclaration,
-  ctx: IntrospectCtx,
-  depth: number,
-  visited: Set<string>
-): JsonSchema2020 | null {
-  const properties: Record<string, JsonSchema2020> = {};
-  const required: string[] = [];
-
-  for (const prop of cls.getProperties()) {
-    if (prop.isStatic()) continue;
-    const name = prop.getName();
-    properties[name] = propertySchema(prop, ctx, depth, visited);
-    if (!isOptionalProperty(prop)) required.push(name);
-  }
-
-  if (Object.keys(properties).length === 0) return null;
-
-  const schema: JsonSchema2020 = { type: 'object', properties };
-  if (required.length > 0) schema.required = required;
-  return schema;
-}
-
 /** Strip generic/union/array decoration from a param type to a bare class name. */
 function bareTypeName(typeText: string | undefined): string | null {
   if (!typeText) return null;
@@ -389,11 +102,15 @@ function bareTypeName(typeText: string | undefined): string | null {
  * type and wraps it in a one-property object. Falls back to an open object with
  * 'unknown' confidence when the relevant decorated param, its DTO type, or the
  * DTO's properties can't be resolved.
+ *
+ * The type walk itself (nested DTOs, enums, arrays, class-validator refinements,
+ * depth + cycle guards) lives in ../ts-type-schema.ts and is shared with the
+ * response-typing paths.
  */
 function resolveSchema(
   method: MethodDeclaration,
   wantDecorator: 'Body' | 'Query',
-  ctx: IntrospectCtx
+  ctx: TypeIndex
 ): { inputSchema: JsonSchema2020; inputSchemaConfidence: InputSchemaConfidence } {
   const param = method.getParameters().find((p: ParameterDeclaration) =>
     p.getDecorators().some((d) => d.getName() === wantDecorator)
@@ -425,16 +142,106 @@ function resolveSchema(
   }
 
   const typeName = bareTypeName(paramType);
-  const dto = typeName ? ctx.dtoIndex.get(typeName) : undefined;
+  const dto = typeName ? ctx.classes.get(typeName) : undefined;
   if (!dto) {
     return { inputSchema: UNKNOWN_SCHEMA, inputSchemaConfidence: 'unknown' };
   }
 
-  const schema = dtoToSchema(dto, ctx, 0, new Set([dto.getName() ?? typeName!]));
+  const schema = declarationToSchema(dto, ctx, 0, new Set([dto.getName() ?? typeName!]));
   if (!schema) {
     return { inputSchema: UNKNOWN_SCHEMA, inputSchemaConfidence: 'unknown' };
   }
   return { inputSchema: schema, inputSchemaConfidence: 'introspected' };
+}
+
+// ─── Response typing ──────────────────────────────────────────────────────────
+
+/** Swagger response decorators whose `type` option names the response DTO. */
+const SWAGGER_RESPONSE_DECORATORS = new Set([
+  'ApiResponse',
+  'ApiOkResponse',
+  'ApiCreatedResponse',
+  'ApiAcceptedResponse',
+  'ApiDefaultResponse',
+]);
+
+type OutputResult = {
+  outputSchema?: JsonSchema2020;
+  outputSchemaConfidence?: OutputSchemaConfidence;
+};
+
+/** Named property of a decorator's options object literal, as a raw node. */
+function decoratorOption(dec: Decorator, name: string): Node | undefined {
+  for (const arg of dec.getArguments()) {
+    if (!Node.isObjectLiteralExpression(arg)) continue;
+    const prop = arg.getProperty(name);
+    if (prop && Node.isPropertyAssignment(prop)) return prop.getInitializer();
+  }
+  return undefined;
+}
+
+function optionIsTrue(dec: Decorator, name: string): boolean {
+  return decoratorOption(dec, name)?.getText() === 'true';
+}
+
+/**
+ * `@ApiResponse({ status, type, isArray })` and its status-specific aliases.
+ * A `status` outside 2xx is ignored (an error-response declaration is not the
+ * success shape). `type: [X]` and `isArray: true` both wrap the schema in an
+ * array. Resolved through the shared type index, so `type: ItemDto` expands the
+ * DTO exactly as an input DTO would.
+ */
+function swaggerResponseSchema(method: MethodDeclaration, ctx: TypeIndex): JsonSchema2020 | undefined {
+  for (const dec of method.getDecorators()) {
+    if (!SWAGGER_RESPONSE_DECORATORS.has(dec.getName())) continue;
+
+    const statusNode = decoratorOption(dec, 'status');
+    if (statusNode) {
+      const statusText = statusNode.getText().replace(/^HttpStatus\./, '');
+      const numeric = Number(statusText);
+      const is2xx = Number.isFinite(numeric)
+        ? numeric >= 200 && numeric < 300
+        : /^(OK|CREATED|ACCEPTED|NO_CONTENT|NON_AUTHORITATIVE_INFORMATION|RESET_CONTENT|PARTIAL_CONTENT)$/.test(
+            statusText
+          );
+      if (!is2xx) continue;
+    }
+
+    const typeNode = decoratorOption(dec, 'type');
+    if (!typeNode) continue;
+
+    // `type: [ItemDto]` — Swagger's array shorthand.
+    let typeText = typeNode.getText();
+    let isArray = optionIsTrue(dec, 'isArray');
+    if (Node.isArrayLiteralExpression(typeNode)) {
+      const first = typeNode.getElements()[0];
+      if (!first) continue;
+      typeText = first.getText();
+      isArray = true;
+    }
+
+    const schema = schemaForTypeText(typeText, ctx);
+    if (!isInformativeSchema(schema)) continue;
+    return isArray ? { type: 'array', items: schema } : schema;
+  }
+  return undefined;
+}
+
+/**
+ * Response schema for a handler method. A Swagger `@Api*Response({ type })`
+ * decorator is a declared contract -> 'introspected'; otherwise the declared TS
+ * return type (`ItemDto`, `ItemDto[]`, `Promise<ItemDto[]>`) is derived ->
+ * 'inferred'. Handlers with no return annotation and no decorator emit nothing.
+ */
+function resolveOutputSchema(method: MethodDeclaration, ctx: TypeIndex): OutputResult {
+  const declared = swaggerResponseSchema(method, ctx);
+  if (declared) return { outputSchema: declared, outputSchemaConfidence: 'introspected' };
+
+  const returnText = unwrapAsyncType(method.getReturnTypeNode()?.getText());
+  if (!returnText) return {};
+  const schema = schemaForTypeText(returnText, ctx);
+  if (!isInformativeSchema(schema)) return {};
+  return { outputSchema: schema, outputSchemaConfidence: 'inferred' };
 }
 
 export function extractNestjsRoutes(root: string): RawToolMeta[] {
@@ -449,21 +256,12 @@ export function extractNestjsRoutes(root: string): RawToolMeta[] {
   }
 
   // Index every class and enum by name so `@Body() dto: SomeDto`, a nested
-  // DTO-typed property, or an enum-typed property can be resolved to its
-  // declaration regardless of which file it lives in.
-  const dtoIndex = new Map<string, ClassDeclaration>();
-  const enumIndex = new Map<string, EnumDeclaration>();
-  for (const sf of project.getSourceFiles()) {
-    for (const cls of sf.getClasses()) {
-      const name = cls.getName();
-      if (name && !dtoIndex.has(name)) dtoIndex.set(name, cls);
-    }
-    for (const en of sf.getEnums()) {
-      const name = en.getName();
-      if (name && !enumIndex.has(name)) enumIndex.set(name, en);
-    }
-  }
-  const ctx: IntrospectCtx = { dtoIndex, enumIndex };
+  // DTO-typed property, an enum-typed property, or a handler's return type can
+  // be resolved to its declaration regardless of which file it lives in.
+  // `includeShapes` is deliberately off: Nest DTOs are classes, and leaving the
+  // interface / type-alias maps empty keeps resolution identical to before the
+  // walk was shared.
+  const ctx = buildTypeIndex(project);
 
   const records: RouteRecord[] = [];
 
@@ -482,11 +280,20 @@ export function extractNestjsRoutes(root: string): RawToolMeta[] {
           const sub = decoratorStringArg(dec) ?? '';
           const path = composeRoute(prefix, sub);
           const sourceLine = dec.getStartLineNumber();
+          const output = resolveOutputSchema(methodNode, ctx);
 
           for (const method of httpMethods) {
             const key = methodToSideEffect(method) === 'safe' ? 'Query' : 'Body';
             const { inputSchema, inputSchemaConfidence } = resolveSchema(methodNode, key, ctx);
-            records.push({ method, path, inputSchema, inputSchemaConfidence, sourceFile, sourceLine });
+            records.push({
+              method,
+              path,
+              inputSchema,
+              inputSchemaConfidence,
+              ...output,
+              sourceFile,
+              sourceLine,
+            });
           }
         }
       }
@@ -509,6 +316,9 @@ export function extractNestjsRoutes(root: string): RawToolMeta[] {
       path: route.path,
       inputSchema: route.inputSchema,
       inputSchemaConfidence: route.inputSchemaConfidence,
+      ...(route.outputSchema
+        ? { outputSchema: route.outputSchema, outputSchemaConfidence: route.outputSchemaConfidence }
+        : {}),
       sideEffectClass: methodToSideEffect(route.method),
       sourceFile: route.sourceFile,
       sourceLine: route.sourceLine,

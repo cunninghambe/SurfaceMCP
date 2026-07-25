@@ -99,6 +99,11 @@ export function buildOpenApiResult(tools: ToolMeta[], opts: OpenApiExportOptions
       'x-surfacemcp-tool-id': tool.toolId,
       'x-surfacemcp-side-effect': tool.sideEffectClass,
       'x-surfacemcp-input-confidence': tool.inputSchemaConfidence,
+      // Only present when a response schema was recovered; mirrors the input
+      // extension so a consumer can tell a declared contract from an inference.
+      ...(tool.outputSchemaConfidence
+        ? { 'x-surfacemcp-output-confidence': tool.outputSchemaConfidence }
+        : {}),
     };
 
     if (isBody && tool.inputSchema) {

@@ -88,6 +88,13 @@ describe('graphql-app schema extraction', () => {
     expect(userQuery!.outputSchema?.type).toBe('object');
   });
 
+  it('marks the SDL-derived outputSchema introspected', () => {
+    for (const tool of extractGraphqlSchema(root, '/graphql')) {
+      if (!tool.outputSchema) continue;
+      expect(tool.outputSchemaConfidence, tool.name).toBe('introspected');
+    }
+  });
+
   it('carries a graphql descriptor with arg SDL types and a shallow scalar selection set', () => {
     const tools = extractGraphqlSchema(root, '/graphql');
     const userQuery = tools.find((t) => t.name === 'query_user');

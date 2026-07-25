@@ -1,8 +1,13 @@
 import { readdirSync, existsSync } from 'node:fs';
 import { resolve, relative } from 'node:path';
 import { Project, SyntaxKind, Node, type ObjectLiteralExpression } from 'ts-morph';
-import type { RawToolMeta, JsonSchema2020, InputSchemaConfidence } from '../../types.js';
-import { toolId, pathToToolName, methodToSideEffect } from '../common.js';
+import type {
+  RawToolMeta,
+  JsonSchema2020,
+  InputSchemaConfidence,
+  OutputSchemaConfidence,
+} from '../../types.js';
+import { toolId, pathToToolName, methodToSideEffect, pickSuccessResponseKey } from '../common.js';
 
 // Shorthand HTTP verbs Fastify exposes on an instance (`fastify.get(...)` etc).
 const SHORTHAND_METHOD_RE = /\.(get|post|put|patch|delete|head|options)\s*$/;
@@ -18,6 +23,8 @@ type RouteRecord = {
   path: string;
   inputSchema: JsonSchema2020;
   inputSchemaConfidence: InputSchemaConfidence;
+  outputSchema?: JsonSchema2020;
+  outputSchemaConfidence?: OutputSchemaConfidence;
   sourceFile: string;
   sourceLine: number;
 };
@@ -134,6 +141,67 @@ function schemaObjectFrom(config: ObjectLiteralExpression): ObjectLiteralExpress
   return schema && Node.isObjectLiteralExpression(schema) ? schema : undefined;
 }
 
+/** Property name of an object-literal member as written (`200`, `'2xx'`, `default`). */
+function propertyKeyText(prop: Node): string | null {
+  if (!Node.isPropertyAssignment(prop)) return null;
+  const nameNode = prop.getNameNode();
+  if (Node.isStringLiteral(nameNode) || Node.isNoSubstitutionTemplateLiteral(nameNode)) {
+    return nameNode.getLiteralValue();
+  }
+  if (Node.isIdentifier(nameNode) || Node.isNumericLiteral(nameNode)) return nameNode.getText();
+  return null;
+}
+
+/**
+ * Resolve the outputSchema from a Fastify `schema.response` map. Fastify treats
+ * these as a serialization contract (it *enforces* them at runtime), so a route
+ * that declares one is the highest-fidelity response typing available on any of
+ * the source-analysed stacks — hence 'introspected'.
+ *
+ * Both accepted shapes are handled: the classic `response: { 200: <schema> }`
+ * and the OpenAPI-flavoured `response: { 200: { content: { 'application/json':
+ * { schema } } } }`. Status selection reuses the same preference order as the
+ * OpenAPI extractor. Anything that isn't a resolvable JSON literal (a `$ref`
+ * helper, an imported constant, `Type.Object(...)` from TypeBox) is skipped
+ * rather than guessed at.
+ */
+function resolveOutputSchema(schemaObj: ObjectLiteralExpression | undefined): {
+  outputSchema?: JsonSchema2020;
+  outputSchemaConfidence?: OutputSchemaConfidence;
+} {
+  if (!schemaObj) return {};
+  const response = getProp(schemaObj, 'response');
+  if (!response || !Node.isObjectLiteralExpression(response)) return {};
+
+  const byKey = new Map<string, Node>();
+  for (const prop of response.getProperties()) {
+    const key = propertyKeyText(prop);
+    if (key === null || !Node.isPropertyAssignment(prop)) continue;
+    const init = prop.getInitializer();
+    if (init) byKey.set(key, init);
+  }
+
+  const chosen = pickSuccessResponseKey(byKey.keys());
+  if (chosen === undefined) return {};
+  const target = byKey.get(chosen)!;
+  if (!Node.isObjectLiteralExpression(target)) return {};
+
+  const value = astToJsonValue(target);
+  if (value === UNRESOLVABLE || value === null || typeof value !== 'object') return {};
+
+  // Unwrap the OpenAPI-style `{ content: { 'application/json': { schema } } }`;
+  // a `content` wrapper with no JSON media type carries nothing we can use.
+  const record = value as Record<string, unknown>;
+  let resolved: unknown = record;
+  if (record.content !== undefined) {
+    const content = record.content as Record<string, { schema?: unknown } | undefined>;
+    resolved = content?.['application/json']?.schema;
+  }
+  if (!resolved || typeof resolved !== 'object') return {};
+
+  return { outputSchema: resolved as JsonSchema2020, outputSchemaConfidence: 'introspected' };
+}
+
 export function extractFastifyRoutes(root: string): RawToolMeta[] {
   const allFiles = walkDir(root);
 
@@ -164,15 +232,14 @@ export function extractFastifyRoutes(root: string): RawToolMeta[] {
         const optionsObj = args
           .slice(1)
           .find((a): a is ObjectLiteralExpression => Node.isObjectLiteralExpression(a));
-        const { inputSchema, inputSchemaConfidence } = resolveSchema(
-          optionsObj ? schemaObjectFrom(optionsObj) : undefined,
-          method
-        );
+        const schemaObj = optionsObj ? schemaObjectFrom(optionsObj) : undefined;
+        const { inputSchema, inputSchemaConfidence } = resolveSchema(schemaObj, method);
         records.push({
           method,
           path,
           inputSchema,
           inputSchemaConfidence,
+          ...resolveOutputSchema(schemaObj),
           sourceFile,
           sourceLine: call.getStartLineNumber(),
         });
@@ -203,9 +270,18 @@ export function extractFastifyRoutes(root: string): RawToolMeta[] {
 
         const schemaObj = schemaObjectFrom(config);
         const sourceLine = call.getStartLineNumber();
+        const output = resolveOutputSchema(schemaObj);
         for (const method of methods) {
           const { inputSchema, inputSchemaConfidence } = resolveSchema(schemaObj, method);
-          records.push({ method, path, inputSchema, inputSchemaConfidence, sourceFile, sourceLine });
+          records.push({
+            method,
+            path,
+            inputSchema,
+            inputSchemaConfidence,
+            ...output,
+            sourceFile,
+            sourceLine,
+          });
         }
       }
     }
@@ -227,6 +303,9 @@ export function extractFastifyRoutes(root: string): RawToolMeta[] {
       path: route.path,
       inputSchema: route.inputSchema,
       inputSchemaConfidence: route.inputSchemaConfidence,
+      ...(route.outputSchema
+        ? { outputSchema: route.outputSchema, outputSchemaConfidence: route.outputSchemaConfidence }
+        : {}),
       sideEffectClass: methodToSideEffect(route.method),
       sourceFile: route.sourceFile,
       sourceLine: route.sourceLine,

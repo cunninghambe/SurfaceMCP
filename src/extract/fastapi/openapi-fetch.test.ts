@@ -32,6 +32,38 @@ describe('fetchFastApiSchema', () => {
     expect(tools.find((t) => t.method === 'POST' && t.path === '/api/items')).toBeDefined();
   });
 
+  it('marks a declared response model introspected, and omits both fields otherwise', async () => {
+    const spec = {
+      openapi: '3.1.0',
+      paths: {
+        '/api/items': {
+          get: {
+            responses: {
+              '200': {
+                content: {
+                  'application/json': {
+                    schema: { type: 'array', items: { $ref: '#/components/schemas/Item' } },
+                  },
+                },
+              },
+            },
+          },
+          delete: { responses: { '204': { description: 'No content' } } },
+        },
+      },
+    };
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, json: () => Promise.resolve(spec) }));
+
+    const tools = await fetchFastApiSchema('http://localhost:8000');
+    const get = tools.find((t) => t.method === 'GET')!;
+    expect(get.outputSchemaConfidence).toBe('introspected');
+    expect(get.outputSchema).toEqual({ type: 'array', items: { $ref: '#/components/schemas/Item' } });
+
+    const del = tools.find((t) => t.method === 'DELETE')!;
+    expect(del.outputSchema).toBeUndefined();
+    expect(del.outputSchemaConfidence).toBeUndefined();
+  });
+
   it('live-fail-with-static: falls back to static openapi.json when fetch fails', async () => {
     vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('ECONNREFUSED')));
 

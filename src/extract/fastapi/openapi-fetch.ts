@@ -87,7 +87,11 @@ function specToTools(spec: OpenApiSchema): RawToolMeta[] {
           path: normalizedPath,
           inputSchema: schema,
           inputSchemaConfidence: confidence,
-          ...(outputSchema ? { outputSchema } : {}),
+          // FastAPI generates the spec from the app's own response models, so a
+          // declared response schema is authoritative.
+          ...(outputSchema
+            ? { outputSchema, outputSchemaConfidence: 'introspected' as const }
+            : {}),
           sideEffectClass: methodToSideEffect(method),
           sourceFile: '',
           sourceLine: 0,

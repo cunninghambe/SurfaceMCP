@@ -35,3 +35,31 @@ export function pathToToolName(method: string, path: string): string {
 export function methodToSideEffect(method: string): SideEffectClass {
   return ['GET', 'HEAD', 'OPTIONS'].includes(method.toUpperCase()) ? 'safe' : 'mutating';
 }
+
+/** Status codes we treat as "the success response", most specific first. */
+const PREFERRED_RESPONSE_CODES = ['200', '201', '202', '203', '204', '2XX', 'DEFAULT'];
+
+/**
+ * Pick the key describing a route's success response from a `responses` map.
+ * Shared by every stack that keys response schemas by status code — OpenAPI /
+ * FastAPI (`responses`) and Fastify (`schema.response`). Prefers 200, then 201,
+ * then the remaining explicit 2xx codes, then a `2xx` wildcard, then `default`,
+ * and finally any other 2xx key in declaration order. Matching is
+ * case-insensitive so Fastify's lowercase `'2xx'` resolves like OpenAPI's `2XX`.
+ * Returns the key exactly as it appeared, or undefined when nothing matches.
+ */
+export function pickSuccessResponseKey(keys: Iterable<string>): string | undefined {
+  const byUpper = new Map<string, string>();
+  for (const key of keys) {
+    const upper = String(key).toUpperCase();
+    if (!byUpper.has(upper)) byUpper.set(upper, key);
+  }
+  for (const code of PREFERRED_RESPONSE_CODES) {
+    const hit = byUpper.get(code);
+    if (hit !== undefined) return hit;
+  }
+  for (const [upper, key] of byUpper) {
+    if (/^2\d\d$/.test(upper)) return key;
+  }
+  return undefined;
+}

@@ -1,7 +1,7 @@
 import { readFileSync, existsSync } from 'node:fs';
 import { resolve } from 'node:path';
 import type { RawToolMeta, JsonSchema2020 } from '../../types.js';
-import { toolId, pathToToolName, methodToSideEffect } from '../common.js';
+import { toolId, pathToToolName, methodToSideEffect, pickSuccessResponseKey } from '../common.js';
 
 type OpenApiSpec = {
   openapi?: string;
@@ -32,17 +32,16 @@ function normalizeApiPath(path: string): string {
 
 /**
  * Extract the JSON response schema for a route's success (2xx) response, so tools
- * advertise what they return. Prefers 200 → 201 → any 2xx → `default`. May contain
- * `$ref`s into components (left unresolved, as with request schemas).
+ * advertise what they return. Prefers 200 → 201 → any 2xx → `default` (status
+ * selection is shared with the other status-keyed stacks; see
+ * `pickSuccessResponseKey`). May contain `$ref`s into components (left
+ * unresolved, as with request schemas).
  */
 export function extractResponseSchema(op: {
   responses?: Record<string, { content?: OpenApiContent }>;
 }): JsonSchema2020 | undefined {
   const responses = op.responses ?? {};
-  const preferred = ['200', '201', '202', '203', '204', '2XX', 'default'];
-  const code =
-    preferred.find((c) => responses[c]) ??
-    Object.keys(responses).find((c) => /^2\d\d$/.test(c));
+  const code = pickSuccessResponseKey(Object.keys(responses));
   if (!code) return undefined;
   const content = responses[code]?.content;
   return content?.['application/json']?.schema ?? undefined;
@@ -134,7 +133,10 @@ export function extractOpenApiRoutes(root: string): RawToolMeta[] {
         path: normalizedPath,
         inputSchema: schema,
         inputSchemaConfidence: confidence,
-        ...(outputSchema ? { outputSchema } : {}),
+        // The spec *is* the contract; a declared response schema is introspected.
+        ...(outputSchema
+          ? { outputSchema, outputSchemaConfidence: 'introspected' as const }
+          : {}),
         sideEffectClass: methodToSideEffect(method),
         sourceFile: specFile,
         sourceLine: 0,

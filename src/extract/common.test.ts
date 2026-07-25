@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { toolId, pathToToolName, methodToSideEffect } from './common.js';
+import { toolId, pathToToolName, methodToSideEffect, pickSuccessResponseKey } from './common.js';
 
 describe('toolId', () => {
   it('is a stable 12-char sha1 of METHOD:path', () => {
@@ -32,5 +32,26 @@ describe('methodToSideEffect', () => {
   it('treats read methods as safe regardless of case', () => {
     for (const m of ['GET', 'get', 'HEAD', 'options']) expect(methodToSideEffect(m)).toBe('safe');
     for (const m of ['POST', 'put', 'DELETE', 'patch']) expect(methodToSideEffect(m)).toBe('mutating');
+  });
+});
+
+describe('pickSuccessResponseKey', () => {
+  it('prefers 200, then 201, then other 2xx, then a wildcard, then default', () => {
+    expect(pickSuccessResponseKey(['500', '201', '200'])).toBe('200');
+    expect(pickSuccessResponseKey(['400', '201'])).toBe('201');
+    expect(pickSuccessResponseKey(['204', '2XX'])).toBe('204');
+    expect(pickSuccessResponseKey(['2XX', 'default'])).toBe('2XX');
+    expect(pickSuccessResponseKey(['default', '404'])).toBe('default');
+    expect(pickSuccessResponseKey(['299'])).toBe('299');
+  });
+
+  it("matches case-insensitively so Fastify's '2xx' resolves, returning the key as written", () => {
+    expect(pickSuccessResponseKey(['2xx'])).toBe('2xx');
+    expect(pickSuccessResponseKey(['DEFAULT'])).toBe('DEFAULT');
+  });
+
+  it('returns undefined when nothing describes a success response', () => {
+    expect(pickSuccessResponseKey([])).toBeUndefined();
+    expect(pickSuccessResponseKey(['400', '404', '500'])).toBeUndefined();
   });
 });
