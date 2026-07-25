@@ -36,6 +36,8 @@ import {
 } from './registry.js';
 import { registerGeneratedTools } from './tools-generated.js';
 import { installShutdown } from './shutdown.js';
+import { parseSnapshot } from '../diff/snapshot.js';
+import { diffCatalogs } from '../diff/surface-diff.js';
 
 const RUNTIME_ENUM_SCHEMA = {
   $schema: 'https://json-schema.org/draft/2020-12/schema',
@@ -542,6 +544,51 @@ function registerMetaTools(
       });
       if (!result.ok) return toolError(result.code, result.message);
       return toolOk(result.data);
+    }
+  );
+
+  // surface_diff
+  server.tool(
+    'surface_diff',
+    'Diff a stored surface snapshot against another snapshot, or against this instance\'s live catalog when "after" is omitted. Joins on the stable toolId and reports added/removed/changed tools with a breaking-vs-non-breaking classification. Snapshots are passed inline (the JSON written by `surfacemcp snapshot`, a { tools: [...] } catalog, or a bare tool array) — this tool reads no files.',
+    {
+      before: z
+        .unknown()
+        .describe('Baseline snapshot: the object written by `surfacemcp snapshot`, a { tools: [...] } catalog, or a bare ToolMeta array.'),
+      after: z
+        .unknown()
+        .optional()
+        .describe('Comparison snapshot in the same shape. Omit to diff against the live catalog of the resolved surface.'),
+      surface: optSurface,
+    },
+    async (args) => {
+      const beforeParsed = parseSnapshot(args.before, 'before');
+      if (!beforeParsed.ok) return toolError(beforeParsed.code, beforeParsed.message);
+
+      let afterTools: ToolMeta[];
+      let afterMeta: { surface: string; revision: number };
+      if (args.after === undefined) {
+        const rt = resolveRuntime(registry, args.surface);
+        if ('error' in rt) return toolError('surface_required', rt.error);
+        afterTools = rt.catalog.tools;
+        afterMeta = { surface: rt.surface.name, revision: rt.catalog.revision };
+      } else {
+        const afterParsed = parseSnapshot(args.after, 'after');
+        if (!afterParsed.ok) return toolError(afterParsed.code, afterParsed.message);
+        afterTools = afterParsed.snapshot.tools;
+        afterMeta = { surface: afterParsed.snapshot.surface, revision: afterParsed.snapshot.revision };
+      }
+
+      const diff = diffCatalogs(beforeParsed.snapshot.tools, afterTools);
+      return toolOk({
+        before: {
+          surface: beforeParsed.snapshot.surface,
+          revision: beforeParsed.snapshot.revision,
+          toolCount: beforeParsed.snapshot.tools.length,
+        },
+        after: { ...afterMeta, toolCount: afterTools.length },
+        ...diff,
+      });
     }
   );
 

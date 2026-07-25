@@ -77,6 +77,8 @@ The server speaks Streamable HTTP MCP at `POST /mcp` on the allocated port (boun
 | `doctor` | Validate config, test logins, check port allocation. |
 | `schema` | Print the JSON Schema for `surfacemcp.config.json` (for editor autocomplete). |
 | `export` | Emit an OpenAPI 3.1 document for the discovered surface (`--surface`, `--out`). |
+| `snapshot` | Write a stable, committable JSON snapshot of the tool catalog (`--surface`, `--out`). |
+| `diff` | Diff two snapshots, or a snapshot against the live surface (`--before`, `--after`, `--out`, `--fail-on-breaking`). |
 
 `serve` starts the MCP endpoint immediately and never blocks on the target: if a
 surface sets `launchDevCommand` and its `baseUrl` isn't reachable, the dev server
@@ -100,6 +102,28 @@ Invocation: `surface_call`, `surface_probe`, `surface_sample_inputs`.
 Tools carry both an `inputSchema` and, where the source provides it (OpenAPI/FastAPI response schemas), an `outputSchema` describing what a call returns. The whole surface can be exported as a portable OpenAPI 3.1 document with `surfacemcp export`.
 Auth: `surface_describe_auth`, `surface_login_status`, `surface_relogin`.
 Runtime route enumeration: `surface_enumerate_routes_runtime`, `surface_postprocess_runtime_routes`.
+Change detection: `surface_diff`.
+
+### Surface diffing
+
+`toolId` is a stable cluster key (`sha1(METHOD:path)`, operation-keyed for GraphQL), so two catalogs captured at different times join on it directly. That gives CI an API-compatibility gate and downstream agents a "what's new since the last scan" worklist.
+
+```bash
+# Capture a baseline and commit it alongside the target app
+surfacemcp snapshot --out=surface.snapshot.json
+
+# Later: diff the baseline against the live surface. JSON on stdout, summary on stderr.
+surfacemcp diff --before=surface.snapshot.json | jq '.summary'
+
+# In CI: exit 1 if the PR breaks the API
+surfacemcp diff --before=surface.snapshot.json --fail-on-breaking > /dev/null
+```
+
+Snapshots are written with sorted keys, tools sorted by `toolId`, and no timestamps, so an unchanged surface re-serializes byte-identically and only real changes show up in review.
+
+The diff reports `added` / `removed` / `changed`, and for changed tools a structural walk of the input and output schemas — added/removed/retyped properties, `required` shifts, enum and constraint movement — with a `breaking: boolean` and a `reason` on every entry. Breaking means *a caller that worked before may stop working*, so the rules are polarity-flipped between inputs (tightening breaks) and outputs (loosening breaks): a newly-required input property, a narrowed input type, or a removed output property are breaking; a new optional input property, a widened input type, or a new output property are not. A `safe` → `mutating` reclassification is breaking; a confidence change never is. See [SPEC_SURFACE_DIFF.md](SPEC_SURFACE_DIFF.md) for the full rule table.
+
+The `surface_diff` MCP tool takes the same snapshots inline (`before`, optional `after`; omit `after` to diff against the live catalog) so agents can request a diff without touching the filesystem.
 
 ### Call semantics
 

@@ -120,6 +120,29 @@ async function main(): Promise<void> {
       break;
     }
 
+    case 'snapshot': {
+      const { runSnapshot } = await import('./snapshot.js');
+      await runSnapshot({
+        projectRoot: typeof args['project-root'] === 'string' ? args['project-root'] : undefined,
+        surface: typeof args['surface'] === 'string' ? args['surface'] : undefined,
+        out: typeof args['out'] === 'string' ? args['out'] : undefined,
+      });
+      break;
+    }
+
+    case 'diff': {
+      const { runDiff } = await import('./diff.js');
+      await runDiff({
+        projectRoot: typeof args['project-root'] === 'string' ? args['project-root'] : undefined,
+        surface: typeof args['surface'] === 'string' ? args['surface'] : undefined,
+        before: typeof args['before'] === 'string' ? args['before'] : undefined,
+        after: typeof args['after'] === 'string' ? args['after'] : undefined,
+        out: typeof args['out'] === 'string' ? args['out'] : undefined,
+        failOnBreaking: args['fail-on-breaking'] === true,
+      });
+      break;
+    }
+
     default:
       console.log(`
 surfacemcp — HTTP MCP server for typed API surface discovery
@@ -134,6 +157,9 @@ Commands:
   doctor        Validate config, test logins, check ports
   schema        Print the JSON Schema for surfacemcp.config.json
   export        Emit an OpenAPI 3.1 doc for the surface (--surface, --out)
+  snapshot      Write a stable, committable JSON snapshot of the tool catalog (--surface, --out)
+  diff          Diff two snapshots, or a snapshot against the live surface
+                (--before, --after, --out, --fail-on-breaking)
 
 Options:
   --stack=<nextjs|express|fastify|nestjs|fastapi|django|vite|openapi|graphql>
@@ -146,6 +172,11 @@ Options:
   --allow-external
   --filter=<pattern>
   --confidence=<level>
+  --surface=<name>
+  --out=<path>
+  --before=<snapshot.json>
+  --after=<snapshot.json>
+  --fail-on-breaking
 `);
   }
 }
