@@ -60,17 +60,34 @@ describe('buildOpenApiDocument', () => {
   });
 });
 
-describe('buildOpenApiResult — GraphQL tools', () => {
+describe('buildOpenApiResult — non-REST tools', () => {
   it('skips GraphQL tools (they share one endpoint) and reports the count', () => {
     const rest = tool({ method: 'GET', path: '/rest', name: 'get_rest' });
     const gql = {
       ...tool({ method: 'POST', path: '/graphql', name: 'query_user' }),
       graphql: { operationType: 'query' as const, field: 'user', args: [] },
     };
-    const { document, skippedGraphql } = buildOpenApiResult([rest, gql], { title: 'API', version: '1.0.0' });
-    expect(skippedGraphql).toBe(1);
+    const { document, skippedNonRest } = buildOpenApiResult([rest, gql], { title: 'API', version: '1.0.0' });
+    expect(skippedNonRest).toBe(1);
     const paths = document.paths as Record<string, unknown>;
     expect(paths).toHaveProperty('/rest');
     expect(paths).not.toHaveProperty('/graphql'); // GraphQL op omitted, not collapsed
+  });
+
+  it('skips tRPC tools rather than collapsing every procedure onto the mount path', () => {
+    const rest = tool({ method: 'GET', path: '/rest', name: 'get_rest' });
+    const q = {
+      ...tool({ method: 'GET', path: '/api/trpc', name: 'query_post_byId' }),
+      trpc: { procedureType: 'query' as const, procedurePath: 'post.byId' },
+    };
+    const m = {
+      ...tool({ method: 'POST', path: '/api/trpc', name: 'mutation_post_create' }),
+      trpc: { procedureType: 'mutation' as const, procedurePath: 'post.create' },
+    };
+    const { document, skippedNonRest } = buildOpenApiResult([rest, q, m], { title: 'API', version: '1.0.0' });
+    expect(skippedNonRest).toBe(2);
+    const paths = document.paths as Record<string, unknown>;
+    expect(paths).toHaveProperty('/rest');
+    expect(paths).not.toHaveProperty('/api/trpc');
   });
 });

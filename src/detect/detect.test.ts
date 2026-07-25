@@ -1,6 +1,8 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, afterEach } from 'vitest';
 import { detectStack } from './index.js';
-import { resolve } from 'node:path';
+import { resolve, dirname } from 'node:path';
+import { mkdirSync, writeFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 
 const FIXTURES = resolve(import.meta.dirname, '../../fixtures');
 
@@ -50,7 +52,63 @@ describe('stack detection', () => {
     expect(detectStack(resolve(FIXTURES, 'graphql-codefirst-app'))).toBe('graphql');
   });
 
+  it('detects trpc for trpc-app fixture (@trpc/server + initTRPC router source)', () => {
+    expect(detectStack(resolve(FIXTURES, 'trpc-app'))).toBe('trpc');
+  });
+
   it('returns null for unknown directory', () => {
     expect(detectStack('/tmp')).toBeNull();
+  });
+});
+
+describe('trpc detection precedence and false positives', () => {
+  const tmpDirs: string[] = [];
+  afterEach(() => {
+    for (const dir of tmpDirs.splice(0)) {
+      try { rmSync(dir, { recursive: true, force: true }); } catch { /* ignore */ }
+    }
+  });
+
+  function makeProject(files: Record<string, string>): string {
+    const dir = resolve(tmpdir(), `surfacemcp-trpc-detect-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    for (const [rel, content] of Object.entries(files)) {
+      const abs = resolve(dir, rel);
+      mkdirSync(dirname(abs), { recursive: true });
+      writeFileSync(abs, content);
+    }
+    tmpDirs.push(dir);
+    return dir;
+  }
+
+  it('wins over nextjs for a T3-style app that hosts a tRPC router', () => {
+    // The entire programmatic surface of such an app is the router; the only Next
+    // handler is the opaque `[trpc]` catch-all. See SPEC_TRPC_STACK.md.
+    const dir = makeProject({
+      'package.json': JSON.stringify({ dependencies: { next: '15.0.0', '@trpc/server': '11.0.0' } }),
+      'next.config.js': 'module.exports = {};',
+      'src/server/api/trpc.ts': "import { initTRPC } from '@trpc/server';\nconst t = initTRPC.create();\nexport const createTRPCRouter = t.router;\n",
+    });
+    expect(detectStack(dir)).toBe('trpc');
+  });
+
+  it('does NOT claim a Next.js app that only consumes a remote tRPC API', () => {
+    // A client lists @trpc/server for its type imports but builds no router.
+    const dir = makeProject({
+      'package.json': JSON.stringify({
+        dependencies: { next: '15.0.0', '@trpc/server': '11.0.0', '@trpc/client': '11.0.0' },
+      }),
+      'next.config.js': 'module.exports = {};',
+      'src/utils/api.ts': "import { createTRPCReact } from '@trpc/react-query';\nimport type { AppRouter } from 'server';\nexport const api = createTRPCReact<AppRouter>();\n",
+    });
+    expect(detectStack(dir)).toBe('nextjs');
+  });
+
+  it('does NOT claim a project with router source but no @trpc/server dependency', () => {
+    const dir = makeProject({
+      'package.json': JSON.stringify({ dependencies: { express: '5.0.0' } }),
+      'src/index.js': "const app = require('express')();\napp.get('/health', (_q, r) => r.send('ok'));\n",
+      'src/router.ts': 'export const appRouter = router({ a: publicProcedure.query(() => 1) });\n',
+    });
+    expect(detectStack(dir)).toBe('express');
   });
 });

@@ -7,6 +7,7 @@ import { resolveCredentials } from '../env/indirection.js';
 import { substitutePathParams } from './path-params.js';
 import { isReadOnlyBlocked, redactHeaders, type CallLimiter } from './rails.js';
 import { buildGraphqlBody } from './graphql-request.js';
+import { buildTrpcRequest } from './trpc-request.js';
 import { log } from '../log.js';
 
 const BODY_MAX_BYTES = 64 * 1024; // 64 KB
@@ -292,6 +293,13 @@ async function executeCallInner(params: CallParams): Promise<SurfaceCallResult> 
           revisionAtCall: params.currentRevision,
         };
       }
+    } else if (params.tool.trpc) {
+      // tRPC: procedures share one mount point and are addressed by dotted path;
+      // a query carries its input in the `input` query param, a mutation in the JSON
+      // body. Guarded strictly on `tool.trpc` so REST and GraphQL are unaffected.
+      const trpcRequest = buildTrpcRequest(params.tool.trpc, url, params.input);
+      fetchUrl = trpcRequest.url;
+      fetchBody = trpcRequest.body;
     } else if (['GET', 'HEAD', 'OPTIONS', 'DELETE'].includes(method)) {
       // Append query params for GET-like methods
       if (Object.keys(bodyInput).length > 0) {

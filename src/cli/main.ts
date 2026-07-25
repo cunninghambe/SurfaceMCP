@@ -162,7 +162,7 @@ Commands:
                 (--before, --after, --out, --fail-on-breaking)
 
 Options:
-  --stack=<nextjs|express|fastify|nestjs|fastapi|django|vite|openapi|graphql>
+  --stack=<nextjs|express|fastify|nestjs|fastapi|django|vite|openapi|graphql|trpc>
   --base-url=<url>
   --project-root=<path>
   --multi-surface

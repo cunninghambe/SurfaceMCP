@@ -8,12 +8,17 @@ import { isNestjs } from './nestjs.js';
 import { isFastApi } from './fastapi.js';
 import { isOpenApi } from './openapi.js';
 import { isGraphql } from './graphql.js';
+import { isTrpc } from './trpc.js';
 
 /**
  * Detect the stack for a given directory. First match wins per spec § 3.3.
  * Returns null if detection fails ('unknown').
  */
 export function detectStack(root: string): Stack | null {
+  // before nextjs — a tRPC server almost always lives *inside* a Next.js app, whose
+  // only route handler is the opaque `[trpc]` catch-all. Requires @trpc/server plus a
+  // router-building source signal, so a client-only consumer can't win. See detect/trpc.ts.
+  if (isTrpc(root)) return 'trpc';
   if (isNextjs(root)) return 'nextjs';
   if (isVite(root)) return 'vite';       // before express — a Vite app may have express as dev dep
   if (isDjango(root)) return 'django';

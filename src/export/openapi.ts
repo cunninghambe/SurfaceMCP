@@ -37,8 +37,8 @@ function toOpenApiPath(path: string): string {
 
 export type OpenApiExportResult = {
   document: Record<string, unknown>;
-  /** Count of GraphQL tools skipped (they don't map to REST paths). */
-  skippedGraphql: number;
+  /** Count of non-REST (GraphQL / tRPC) tools skipped — they don't map to REST paths. */
+  skippedNonRest: number;
 };
 
 export function buildOpenApiDocument(tools: ToolMeta[], opts: OpenApiExportOptions): Record<string, unknown> {
@@ -47,17 +47,18 @@ export function buildOpenApiDocument(tools: ToolMeta[], opts: OpenApiExportOptio
 
 /**
  * Like buildOpenApiDocument but also reports how many tools were skipped. GraphQL
- * tools all share `POST <graphqlPath>` with the operation in the body, so they
- * cannot be represented as distinct REST paths — they are omitted rather than
+ * tools all share `POST <graphqlPath>` with the operation in the body, and tRPC tools
+ * all share `GET|POST <trpcPath>` with the operation in a dotted path suffix, so
+ * neither can be represented as distinct REST paths — they are omitted rather than
  * collapsed onto one path (which would silently drop all but one operation).
  */
 export function buildOpenApiResult(tools: ToolMeta[], opts: OpenApiExportOptions): OpenApiExportResult {
   const paths: Record<string, Record<string, unknown>> = {};
-  let skippedGraphql = 0;
+  let skippedNonRest = 0;
 
   for (const tool of tools) {
-    if (tool.graphql) {
-      skippedGraphql++;
+    if (tool.graphql || tool.trpc) {
+      skippedNonRest++;
       continue;
     }
     const openApiPath = toOpenApiPath(tool.path);
@@ -120,5 +121,5 @@ export function buildOpenApiResult(tools: ToolMeta[], opts: OpenApiExportOptions
     ...(opts.baseUrl ? { servers: [{ url: opts.baseUrl }] } : {}),
     paths,
   };
-  return { document, skippedGraphql };
+  return { document, skippedNonRest };
 }

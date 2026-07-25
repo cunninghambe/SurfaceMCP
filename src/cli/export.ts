@@ -46,20 +46,20 @@ export async function runExport(opts: ExportOptions): Promise<void> {
   await regenerateCatalogForSurface(surface, root);
   const catalog = getCatalog();
 
-  const { document, skippedGraphql } = buildOpenApiResult(catalog.tools, {
+  const { document, skippedNonRest } = buildOpenApiResult(catalog.tools, {
     title: `${surface.name} (SurfaceMCP)`,
     version: readVersion(),
     baseUrl: surface.baseUrl,
   });
   const json = JSON.stringify(document, null, 2);
 
-  if (skippedGraphql > 0) {
+  if (skippedNonRest > 0) {
     console.error(
-      `Note: skipped ${skippedGraphql} GraphQL operation(s) — GraphQL operations post to a single endpoint and don't map to REST paths. Use the GraphQL SDL/introspection for that surface instead.`
+      `Note: skipped ${skippedNonRest} GraphQL/tRPC operation(s) — those operations share a single endpoint and don't map to REST paths. Use the GraphQL SDL/introspection or the tRPC router types for that surface instead.`
     );
   }
 
-  const restCount = catalog.tools.length - skippedGraphql;
+  const restCount = catalog.tools.length - skippedNonRest;
   if (opts.out) {
     // `--out` is a user-supplied destination on a user-run CLI, so writing outside
     // the project root (`--out ../api.json`, or an absolute path) is intended and

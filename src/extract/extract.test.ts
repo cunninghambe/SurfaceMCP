@@ -4,6 +4,7 @@ import { extractServerActions } from './nextjs/server-actions.js';
 import { extractExpressRoutes } from './express/static.js';
 import { extractFastifyRoutes } from './fastify/routes.js';
 import { extractNestjsRoutes } from './nestjs/routes.js';
+import { extractTrpcRouter } from './trpc/router.js';
 import { extractDjangoRoutes } from './django/ast-walk.js';
 import { extractOpenApiRoutes } from './openapi/parse.js';
 import { extractPagesForStack } from './pages/index.js';
@@ -212,6 +213,36 @@ describe('nestjs route extraction', () => {
     expect(search!.inputSchema.properties?.limit).toEqual({ type: 'integer' });
     expect(del!.inputSchemaConfidence).toBe('unknown');
     expect(list!.inputSchemaConfidence).toBe('unknown');
+  });
+});
+
+describe('trpc router extraction', () => {
+  it('discovers all must-discover procedures', () => {
+    const root = resolve(FIXTURES, 'trpc-app');
+    const tools = extractTrpcRouter(root, '/api/trpc');
+    const must = JSON.parse(readFileSync(resolve(root, 'MUST_DISCOVER.json'), 'utf-8')) as {
+      procedures: Array<{ toolId: string; name: string; procedurePath: string; method: string }>;
+    };
+    const byId = new Map(tools.map((t) => [t.toolId, t]));
+    for (const expected of must.procedures) {
+      const t = byId.get(expected.toolId);
+      expect(t, `Missing procedure: ${expected.procedurePath}`).toBeDefined();
+      expect(t!.name).toBe(expected.name);
+      expect(t!.method).toBe(expected.method);
+    }
+    expect(tools).toHaveLength(must.procedures.length);
+  });
+
+  it('resolves zod .input()/.output() where statically reachable', () => {
+    const root = resolve(FIXTURES, 'trpc-app');
+    const tools = extractTrpcRouter(root, '/api/trpc');
+    const create = tools.find((t) => t.trpc?.procedurePath === 'post.create');
+    expect(create!.inputSchemaConfidence).toBe('introspected');
+    expect(create!.inputSchema.properties?.title).toBeDefined();
+    expect(create!.outputSchema?.properties?.id).toBeDefined();
+    // Cross-module schema reference is out of reach of the file-scoped zod reader.
+    const search = tools.find((t) => t.trpc?.procedurePath === 'search');
+    expect(search!.inputSchemaConfidence).toBe('unknown');
   });
 });
 
