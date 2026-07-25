@@ -157,6 +157,84 @@ describe('findLiteralCredentialPaths', () => {
     const cfg = cfgWithRoles([{ name: 'anon' }]);
     expect(findLiteralCredentialPaths(cfg)).toEqual([]);
   });
+
+  it('flags an inline oauth2 client_secret (auth-kind agnostic)', () => {
+    const cfg = cfgWithRoles([
+      { name: 'service', credentials: { client_id: '$env:CLIENT_ID', client_secret: 'inline-secret' } },
+    ]);
+    expect(findLiteralCredentialPaths(cfg)).toEqual(['surfaces[0].roles[0].credentials.client_secret']);
+  });
+});
+
+describe('AuthConfigSchema — oauth2 kind', () => {
+  const path = join(tmpdir(), 'surfacemcp-cfg-oauth2-test.json');
+
+  function loadWithAuth(auth: unknown) {
+    const cfg = {
+      surfaces: [
+        {
+          name: 'api',
+          stack: 'openapi',
+          root: '.',
+          baseUrl: 'http://localhost:5000',
+          port: 3140,
+          auth,
+          roles: [{ name: 'service', credentials: { client_id: '$env:CID', client_secret: '$env:CSECRET' } }],
+        },
+      ],
+    };
+    writeFileSync(path, JSON.stringify(cfg));
+    try {
+      return loadConfig(path);
+    } finally {
+      rmSync(path, { force: true });
+    }
+  }
+
+  it('parses a minimal oauth2 block (tokenUrl only)', () => {
+    const auth = loadWithAuth({ kind: 'oauth2', tokenUrl: 'https://auth.example.com/token' }).surfaces[0]!.auth;
+    expect(auth.kind).toBe('oauth2');
+    if (auth.kind !== 'oauth2') return;
+    expect(auth.tokenUrl).toBe('https://auth.example.com/token');
+    // Defaults are applied at use-site, so the parsed config keeps them undefined.
+    expect(auth.grantType).toBeUndefined();
+    expect(auth.clientAuth).toBeUndefined();
+  });
+
+  it('parses the full oauth2 block', () => {
+    const auth = loadWithAuth({
+      kind: 'oauth2',
+      tokenUrl: 'https://auth.example.com/token',
+      grantType: 'client_credentials',
+      clientAuth: 'body',
+      scope: 'read write',
+      audience: 'https://api.example.com',
+    }).surfaces[0]!.auth;
+    expect(auth).toEqual({
+      kind: 'oauth2',
+      tokenUrl: 'https://auth.example.com/token',
+      grantType: 'client_credentials',
+      clientAuth: 'body',
+      scope: 'read write',
+      audience: 'https://api.example.com',
+    });
+  });
+
+  it('rejects a missing, non-URL or non-http(s) tokenUrl and an unknown clientAuth', () => {
+    expect(() => loadWithAuth({ kind: 'oauth2' })).toThrow();
+    expect(() => loadWithAuth({ kind: 'oauth2', tokenUrl: 'not-a-url' })).toThrow();
+    // The client secret is POSTed to this URL — no non-http(s) scheme may be dialled.
+    expect(() => loadWithAuth({ kind: 'oauth2', tokenUrl: 'file:///etc/passwd' })).toThrow();
+    // Credentials belong in roles[].credentials, never embedded in a URL.
+    expect(() => loadWithAuth({ kind: 'oauth2', tokenUrl: 'https://id:secret@auth.example.com/t' })).toThrow();
+    expect(() =>
+      loadWithAuth({ kind: 'oauth2', tokenUrl: 'https://a.example.com/t', clientAuth: 'header' })
+    ).toThrow();
+  });
+
+  it('appears in the generated JSON Schema', () => {
+    expect(JSON.stringify(configJsonSchema())).toContain('tokenUrl');
+  });
 });
 
 describe('loadConfig — schemaIntrospection.bodyValidatorNames', () => {

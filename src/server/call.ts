@@ -2,6 +2,7 @@ import type { ToolMeta, SurfaceCallResult, AuthConfig } from '../types.js';
 import type { RoleMutex } from '../auth/role-mutex.js';
 import { shouldAutoRelogin } from '../auth/refresh-policy.js';
 import { getApiKey } from '../auth/api-key.js';
+import { oauth2AuthorizationHeader } from '../auth/oauth2.js';
 import { resolveCredentials } from '../env/indirection.js';
 import { substitutePathParams } from './path-params.js';
 import { isReadOnlyBlocked, redactHeaders, type CallLimiter } from './rails.js';
@@ -39,7 +40,7 @@ type CallParams = {
 
 function buildHeaders(
   auth: AuthConfig,
-  session: { cookies?: string[]; token?: string } | undefined,
+  session: { cookies?: string[]; token?: string; tokenType?: string } | undefined,
   roleCredentials: Record<string, string>,
   projectName: string,
   extraCookie?: string
@@ -63,6 +64,13 @@ function buildHeaders(
       case 'bearer':
         if (session.token) {
           headers['Authorization'] = `Bearer ${session.token}`;
+        }
+        break;
+      case 'oauth2':
+        // Access token minted by the token endpoint; `token_type` is honored when
+        // the authorization server returned something other than Bearer.
+        if (session.token) {
+          headers['Authorization'] = oauth2AuthorizationHeader(session.token, session.tokenType);
         }
         break;
       case 'api_key': {
@@ -384,7 +392,7 @@ async function executeCallInner(params: CallParams): Promise<SurfaceCallResult> 
         ? params.auth.cookieName ?? 'next-auth.session-token'
         : 'session';
 
-    if (shouldAutoRelogin(result.status, result.headers, result.body, cookieName)) {
+    if (shouldAutoRelogin(result.status, result.headers, result.body, cookieName, params.auth.kind)) {
       log.info({ role: params.role, status: result.status }, 'auto-relogin triggered');
       try {
         session = await params.roleMutex.refresh(params.role);

@@ -2,6 +2,7 @@ import type { RoleSession, AuthConfig, RoleConfig } from '../types.js';
 import { loginForm } from './form.js';
 import { loginNextAuth } from './nextauth.js';
 import { getBearer } from './bearer.js';
+import { fetchOAuth2Token } from './oauth2.js';
 import { resolveCredentials } from '../env/indirection.js';
 import { log } from '../log.js';
 
@@ -13,6 +14,16 @@ type LoginFn = () => Promise<RoleSession>;
  * so the public surface can always be exercised (BugHunter's no-login default).
  */
 const ANONYMOUS_ROLE_NAME = 'anonymous';
+
+/**
+ * True when a session carries a known expiry that has passed. Only OAuth2
+ * sessions set `expiresAt`, so every other auth kind is unaffected (a session
+ * without an expiry is never considered stale — those kinds rely on the
+ * reactive 401 path, exactly as before).
+ */
+export function isSessionExpired(session: RoleSession, now = Date.now()): boolean {
+  return session.expiresAt !== undefined && now >= session.expiresAt;
+}
 
 /**
  * Per-role mutex: ensures only one login is in-flight at a time per role.
@@ -35,9 +46,19 @@ export class RoleMutex {
     return this.sessions.get(roleName);
   }
 
+  /**
+   * Return the cached session for a role, minting one if absent — or replacing
+   * it when it carries an expiry that has passed (OAuth2). The expired case goes
+   * through `refresh()`, so concurrent callers still collapse onto a single
+   * in-flight token request rather than stampeding the authorization server.
+   */
   async ensureSession(roleName: string): Promise<RoleSession> {
     const existing = this.sessions.get(roleName);
-    if (existing) return existing;
+    if (existing && !isSessionExpired(existing)) return existing;
+    // One line per actual re-authentication, not one per queued caller.
+    if (existing && !this.inflight.has(roleName)) {
+      log.info({ role: roleName }, 'session expired — re-authenticating proactively');
+    }
     return this.refresh(roleName);
   }
 
@@ -81,6 +102,9 @@ export class RoleMutex {
 
     let cookies: string[] = [];
     let token: string | undefined;
+    let tokenType: string | undefined;
+    let expiresAt: number | undefined;
+    let refreshToken: string | undefined;
 
     // Anonymous role: no credentials configured. Skip login regardless of auth.kind;
     // requests go unauthenticated so we can exercise the public surface as the role.
@@ -121,6 +145,21 @@ export class RoleMutex {
       case 'api_key':
         // No login step; api key is sent per-request
         break;
+
+      case 'oauth2': {
+        // Reuse a refresh token from the session being replaced, when the AS
+        // issued one; fetchOAuth2Token falls back to client_credentials if the
+        // refresh grant is rejected. Nothing here is ever logged.
+        const result = await fetchOAuth2Token(this.auth, role.credentials, {
+          ...(existing?.refreshToken !== undefined && { refreshToken: existing.refreshToken }),
+        });
+        if (!result.ok) throw new Error(result.error);
+        token = result.token.accessToken;
+        tokenType = result.token.tokenType;
+        expiresAt = result.token.expiresAt;
+        refreshToken = result.token.refreshToken;
+        break;
+      }
     }
 
     return {
@@ -129,6 +168,9 @@ export class RoleMutex {
       cachedAt: now,
       lastRefreshAt: existing ? now : undefined,
       refreshCount,
+      ...(tokenType !== undefined && { tokenType }),
+      ...(expiresAt !== undefined && { expiresAt }),
+      ...(refreshToken !== undefined && { refreshToken }),
     };
   }
 

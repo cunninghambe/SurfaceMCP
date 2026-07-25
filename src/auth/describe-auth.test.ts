@@ -145,6 +145,79 @@ describe('buildDescribeAuth', () => {
     expect(result.reason).toBe('programmatic_only');
   });
 
+  it('auth.kind === oauth2 — reports shape only; never the client secret', () => {
+    const oauth2Auth: AuthConfig = {
+      kind: 'oauth2',
+      tokenUrl: 'https://auth.example.com/oauth2/token',
+      scope: 'read:things',
+      audience: 'https://api.example.com',
+    };
+    const serviceRole: RoleConfig = {
+      name: 'service',
+      credentials: { client_id: 'svc-client', client_secret: 'svc-secret' },
+    };
+
+    const result = buildDescribeAuth(oauth2Auth, serviceRole);
+    expect(result.authKind).toBe('oauth2');
+    if (result.authKind !== 'oauth2') return;
+    expect(result.reason).toBe('programmatic_only');
+    expect(result.tokenUrl).toBe('https://auth.example.com/oauth2/token');
+    // Defaults surfaced explicitly.
+    expect(result.grantType).toBe('client_credentials');
+    expect(result.clientAuth).toBe('basic');
+    expect(result.scope).toBe('read:things');
+    expect(result.audience).toBe('https://api.example.com');
+    expect(result.fields).toEqual({ client_id: 'client_id', client_secret: 'client_secret' });
+    expect(result.valueMeta).toEqual({
+      client_id: { present: true, length: 'svc-client'.length, source: 'literal' },
+      client_secret: { present: true, length: 'svc-secret'.length, source: 'literal' },
+    });
+    expect(result.redacted).toBe(true);
+
+    // Nothing anywhere in the payload resembles the secret.
+    expect(JSON.stringify(result)).not.toContain('svc-secret');
+    expect(JSON.stringify(result)).not.toContain('svc-client');
+  });
+
+  it('auth.kind === oauth2 — revealSecrets does NOT expose the client secret', () => {
+    const oauth2Auth: AuthConfig = { kind: 'oauth2', tokenUrl: 'https://auth.example.com/token' };
+    const serviceRole: RoleConfig = {
+      name: 'service',
+      credentials: { client_id: 'svc-client', client_secret: 'svc-secret' },
+    };
+    const result = buildDescribeAuth(oauth2Auth, serviceRole, true);
+    expect(result.authKind).toBe('oauth2');
+    if (result.authKind !== 'oauth2') return;
+    expect(result.redacted).toBe(true);
+    expect(JSON.stringify(result)).not.toContain('svc-secret');
+    expect('values' in result).toBe(false);
+  });
+
+  it('auth.kind === oauth2 — reports $env: provenance and missing credentials by key name', () => {
+    const savedEnv = process.env['TEST_CLIENT_SECRET'];
+    process.env['TEST_CLIENT_SECRET'] = 'env-client-secret';
+    try {
+      const oauth2Auth: AuthConfig = { kind: 'oauth2', tokenUrl: 'https://auth.example.com/token', clientAuth: 'body' };
+      const role: RoleConfig = { name: 'service', credentials: { clientSecret: '$env:TEST_CLIENT_SECRET' } };
+      const result = buildDescribeAuth(oauth2Auth, role);
+      expect(result.authKind).toBe('oauth2');
+      if (result.authKind !== 'oauth2') return;
+      expect(result.clientAuth).toBe('body');
+      // camelCase alias is reported under its canonical field name.
+      expect(result.fields).toEqual({ clientSecret: 'client_secret', client_id: 'client_id' });
+      expect(result.valueMeta['client_secret']).toEqual({
+        present: true,
+        length: 'env-client-secret'.length,
+        source: 'env',
+      });
+      expect(result.valueMeta['client_id']).toEqual({ present: false, length: 0, source: 'missing' });
+      expect(JSON.stringify(result)).not.toContain('env-client-secret');
+    } finally {
+      if (savedEnv === undefined) delete process.env['TEST_CLIENT_SECRET'];
+      else process.env['TEST_CLIENT_SECRET'] = savedEnv;
+    }
+  });
+
   it('anonymous role (no credentials) — returns role_has_no_credentials sentinel', () => {
     const result = buildDescribeAuth(formAuth, anonymousRole);
     expect(result).toEqual({ authKind: 'anonymous', reason: 'role_has_no_credentials' });

@@ -28,6 +28,33 @@
       "excludedRoutes": [],
       "externalIntegrations": [],
       "_suggestedExternalIntegrations": []
+    },
+    {
+      "name": "api",
+      "stack": "openapi",
+      "root": "./services/api",
+      "baseUrl": "https://api.example.com",
+      "port": 3103,
+      "auth": {
+        "kind": "oauth2",
+        "tokenUrl": "https://auth.example.com/oauth2/token",
+        "grantType": "client_credentials",
+        "clientAuth": "basic",
+        "scope": "read:things write:things",
+        "audience": "https://api.example.com"
+      },
+      "roles": [
+        {
+          "name": "service",
+          "credentials": {
+            "client_id": "$env:API_CLIENT_ID",
+            "client_secret": "$env:API_CLIENT_SECRET"
+          }
+        }
+      ],
+      "excludedRoutes": [],
+      "externalIntegrations": [],
+      "_suggestedExternalIntegrations": []
     }
   ]
 }
