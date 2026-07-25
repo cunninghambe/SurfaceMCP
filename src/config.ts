@@ -115,12 +115,14 @@ const SurfaceConfigSchema = z.object({
       message:
         'Surface name must contain only [a-zA-Z0-9_-]. Reserved characters ":" and "." are not allowed because they are used in tool naming.',
     }),
-  stack: z.enum(['nextjs', 'express', 'fastify', 'nestjs', 'fastapi', 'django', 'openapi', 'vite', 'graphql']),
+  stack: z.enum(['nextjs', 'express', 'fastify', 'nestjs', 'fastapi', 'django', 'openapi', 'vite', 'graphql', 'trpc']),
   root: z.string(),
   baseUrl: z.string().url(),
   port: z.number().int().min(3102).max(3199),
   /** GraphQL endpoint path (graphql stack only). Defaults to '/graphql' when unset. */
   graphqlPath: z.string().optional(),
+  /** tRPC mount path (trpc stack only). Defaults to '/api/trpc' when unset. */
+  trpcPath: z.string().optional(),
   launchDevCommand: z.string().optional(),
   watchPaths: z.array(z.string()).optional(),
   watchIgnore: z.array(z.string()).optional(),

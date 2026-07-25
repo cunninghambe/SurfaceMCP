@@ -57,6 +57,24 @@ export type GraphQLToolDescriptor = {
 };
 
 /**
+ * Descriptor for a tRPC-backed tool. Present only on tools extracted from a tRPC
+ * router; absent (`undefined`) on every other tool. Like GraphQL, tRPC is not
+ * path-per-operation: every procedure is addressed by a dotted path appended to a
+ * single mount point, so this carries what `executeCall` needs to build the real
+ * request URL/body at call time.
+ */
+export type TrpcToolDescriptor = {
+  /** Procedure kind. `query` → HTTP GET + `safe`; `mutation` → HTTP POST + `mutating`. */
+  procedureType: 'query' | 'mutation';
+  /**
+   * Full dotted path addressing the procedure under the mount point, e.g. `post.byId`
+   * for `router({ post: router({ byId: publicProcedure… }) })`. Appended to the tool's
+   * `path` (the configured `trpcPath`) to form the request URL.
+   */
+  procedurePath: string;
+};
+
+/**
  * Raw tool metadata as produced by per-stack extractors.
  * Does not include surface-level fields populated by tools-meta.
  */
@@ -75,6 +93,8 @@ export type RawToolMeta = {
   isServerAction: boolean;
   /** Present only on GraphQL tools; see GraphQLToolDescriptor. Optional so REST tools are unaffected. */
   graphql?: GraphQLToolDescriptor;
+  /** Present only on tRPC tools; see TrpcToolDescriptor. Optional so REST/GraphQL tools are unaffected. */
+  trpc?: TrpcToolDescriptor;
 };
 
 export type ToolMeta = RawToolMeta & {
@@ -91,7 +111,7 @@ export type ToolCatalog = {
   tools: ToolMeta[];
 };
 
-export type Stack = 'nextjs' | 'express' | 'fastify' | 'nestjs' | 'fastapi' | 'django' | 'openapi' | 'vite' | 'graphql';
+export type Stack = 'nextjs' | 'express' | 'fastify' | 'nestjs' | 'fastapi' | 'django' | 'openapi' | 'vite' | 'graphql' | 'trpc';
 
 export type PageSource = 'static' | 'crawl_seed';
 

@@ -96,6 +96,7 @@ function defaultLaunchCommand(stack: string): string | undefined {
     fastapi: 'uvicorn main:app --reload',
     django: 'python manage.py runserver',
     graphql: 'npm run dev',
+    trpc: 'npm run dev',
   };
   return cmds[stack];
 }
@@ -111,6 +112,8 @@ function defaultBaseUrl(stack: string): string {
     django: 'http://localhost:8000',
     openapi: 'http://localhost:3000',
     graphql: 'http://localhost:4000',
+    // tRPC is most often mounted inside a Next.js app.
+    trpc: 'http://localhost:3000',
   };
   return urls[stack] ?? 'http://localhost:3000';
 }
@@ -126,6 +129,7 @@ function defaultWatchPaths(stack: string): string[] {
     django: ['.'],
     openapi: ['.'],
     graphql: ['.', 'src'],
+    trpc: ['src', '.'],
   };
   return paths[stack] ?? ['src'];
 }
@@ -184,7 +188,7 @@ export async function runInit(opts: InitOptions): Promise<void> {
     const detected = stackOverride ?? detectStack(projectRoot);
     if (!detected) {
       throw new Error(
-        'Could not detect stack. Use --stack=<nextjs|vite|express|fastify|nestjs|fastapi|django|openapi|graphql> to override.'
+        'Could not detect stack. Use --stack=<nextjs|vite|express|fastify|nestjs|fastapi|django|openapi|graphql|trpc> to override.'
       );
     }
     // Hint: Vite present but no recognized router — manual config needed

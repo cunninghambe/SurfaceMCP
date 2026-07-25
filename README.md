@@ -20,6 +20,7 @@ Working implementation, **v0.3.1**. Multi-surface, role-aware, with unit + e2e t
 - **Django** (URLconf walk)
 - **Vite SPA** (client-side route + navigation discovery, crawl-seed fallback)
 - **GraphQL** (schema-first SDL: one tool per top-level Query/Mutation field, args → `inputSchema`, return type → `outputSchema`, callable via `{ query, variables }`)
+- **tRPC** (router walk: one tool per procedure by dotted path, zod `.input()`/`.output()` → `inputSchema`/`outputSchema`, callable over the tRPC HTTP protocol)
 - **Generic OpenAPI** fallback (any framework that emits `openapi.json`/`yaml`)
 
 ## Install

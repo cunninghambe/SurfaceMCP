@@ -128,3 +128,63 @@ describe('surface prefix + toolId', () => {
     }
   });
 });
+
+describe('surface-scoped toolId for tRPC procedures', () => {
+  async function buildTrpcCatalog(trpcPath?: string) {
+    const { regenerateCatalog } = await import('./tools-meta.js');
+    const { resolve } = await import('node:path');
+    const { RoleMutex } = await import('../auth/role-mutex.js');
+
+    const root = resolve(import.meta.dirname, '../../fixtures/trpc-app');
+    const surface = {
+      name: 'test-api',
+      stack: 'trpc' as const,
+      root: '.',
+      baseUrl: 'http://localhost:3200',
+      port: 3140 as const,
+      ...(trpcPath ? { trpcPath } : {}),
+      auth: { kind: 'none' as const },
+      roles: [],
+    };
+    const runtime: SurfaceRuntime = {
+      surface,
+      resolvedRoot: root,
+      state: { kind: 'extracting' },
+      catalog: { revision: 0, tools: [] },
+      pageCatalog: { revision: 0, pages: [], skips: [] },
+      navigationCatalog: { revision: 0, navigations: [], skips: [] },
+      roleMutex: new RoleMutex(surface.baseUrl, surface.auth, surface.roles),
+    };
+    await regenerateCatalog(runtime, root, false);
+    return runtime;
+  }
+
+  it('does not collide procedures that share the single mount path', async () => {
+    const runtime = await buildTrpcCatalog();
+    const tools = runtime.catalog.tools;
+    expect(tools.length).toBeGreaterThan(1);
+    // Every query shares `GET /api/trpc`, so a method:path-keyed surface id would
+    // collapse them; the procedure-keyed branch keeps them distinct.
+    expect(new Set(tools.map((t) => t.toolId)).size).toBe(tools.length);
+    for (const tool of tools) {
+      expect(tool.path).toBe('/api/trpc');
+      expect(tool.toolId).toMatch(/^[0-9a-f]{12}$/);
+    }
+  });
+
+  it('keeps the extractor side-effect classes through the call-graph pass', async () => {
+    const runtime = await buildTrpcCatalog();
+    for (const tool of runtime.catalog.tools) {
+      expect(tool.sideEffectClass).toBe(tool.trpc?.procedureType === 'query' ? 'safe' : 'mutating');
+    }
+  });
+
+  it('threads surface.trpcPath into every tool path, leaving toolIds untouched', async () => {
+    const withDefault = await buildTrpcCatalog();
+    const withCustom = await buildTrpcCatalog('/trpc');
+    expect(withCustom.catalog.tools.every((t) => t.path === '/trpc')).toBe(true);
+    expect(withCustom.catalog.tools.map((t) => t.toolId)).toEqual(
+      withDefault.catalog.tools.map((t) => t.toolId)
+    );
+  });
+});

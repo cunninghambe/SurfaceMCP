@@ -1,0 +1,58 @@
+{
+  "procedures": [
+    {
+      "toolId": "aca578bc7a03",
+      "name": "query_health",
+      "procedureType": "query",
+      "procedurePath": "health",
+      "method": "GET",
+      "sideEffectClass": "safe",
+      "inputSchemaConfidence": "introspected"
+    },
+    {
+      "toolId": "100a056bb8aa",
+      "name": "query_search",
+      "procedureType": "query",
+      "procedurePath": "search",
+      "method": "GET",
+      "sideEffectClass": "safe",
+      "inputSchemaConfidence": "unknown"
+    },
+    {
+      "toolId": "a1dbebb3d8d9",
+      "name": "query_post_list",
+      "procedureType": "query",
+      "procedurePath": "post.list",
+      "method": "GET",
+      "sideEffectClass": "safe",
+      "inputSchemaConfidence": "introspected"
+    },
+    {
+      "toolId": "4d06191f73a6",
+      "name": "query_post_byId",
+      "procedureType": "query",
+      "procedurePath": "post.byId",
+      "method": "GET",
+      "sideEffectClass": "safe",
+      "inputSchemaConfidence": "introspected"
+    },
+    {
+      "toolId": "32441e8677ed",
+      "name": "mutation_post_create",
+      "procedureType": "mutation",
+      "procedurePath": "post.create",
+      "method": "POST",
+      "sideEffectClass": "mutating",
+      "inputSchemaConfidence": "introspected"
+    },
+    {
+      "toolId": "02d543cafdda",
+      "name": "query_user_byEmail",
+      "procedureType": "query",
+      "procedurePath": "user.byEmail",
+      "method": "GET",
+      "sideEffectClass": "safe",
+      "inputSchemaConfidence": "introspected"
+    }
+  ]
+}

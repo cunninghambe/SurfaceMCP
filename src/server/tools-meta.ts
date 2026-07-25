@@ -10,16 +10,20 @@ import { extractDjangoRoutes } from '../extract/django/ast-walk.js';
 import { extractOpenApiRoutes } from '../extract/openapi/parse.js';
 import { extractGraphqlSchema } from '../extract/graphql/parse.js';
 import { extractGraphqlCodeFirst } from '../extract/graphql/code-first.js';
+import { extractTrpcRouter } from '../extract/trpc/router.js';
 import { extractPagesForStack } from '../extract/pages/index.js';
 import { classifyByCallGraph } from '../classify/call-graph.js';
 import { log } from '../log.js';
 
 function prefixedToolId(surfaceName: string, tool: RawToolMeta): string {
-  // GraphQL tools all share `POST <graphqlPath>`, so keying the surface-scoped id on
-  // method:path would collide every operation onto one id. Key on the operation
-  // instead (mirrors the raw operation-keyed id). REST tools keep method:path exactly.
+  // GraphQL tools all share `POST <graphqlPath>` and tRPC tools all share
+  // `GET|POST <trpcPath>`, so keying the surface-scoped id on method:path would
+  // collide their operations onto one id. Key on the operation instead (mirrors the
+  // raw operation-keyed ids). REST tools keep method:path exactly.
   const key = tool.graphql
     ? `${surfaceName}:graphql:${tool.graphql.operationType}:${tool.graphql.field}`
+    : tool.trpc
+    ? `${surfaceName}:trpc:${tool.trpc.procedureType}:${tool.trpc.procedurePath}`
     : `${surfaceName}:${tool.method}:${tool.path}`;
   return createHash('sha1').update(key).digest('hex').slice(0, 12);
 }
@@ -72,6 +76,8 @@ async function extractRaw(surface: SurfaceConfig, root: string): Promise<RawTool
       const sdlTools = extractGraphqlSchema(root, graphqlPath);
       return sdlTools.length > 0 ? sdlTools : extractGraphqlCodeFirst(root, graphqlPath);
     }
+    case 'trpc':
+      return extractTrpcRouter(root, surface.trpcPath ?? '/api/trpc');
     case 'vite':
       return [];
   }
@@ -100,7 +106,10 @@ export async function regenerateCatalog(
     // GraphQL Query fields are `safe` and Mutation fields `mutating`, decided at
     // extraction from the operation type. The call-graph classifier keys on the HTTP
     // method — always POST for GraphQL — and would force every Query to `mutating`,
-    // so preserve the extractor's classification for GraphQL tools.
+    // so preserve the extractor's classification for GraphQL tools. tRPC needs no such
+    // exemption: its queries really are GET and its mutations POST, so the classifier
+    // already agrees with the extractor (and can still promote a mutation to
+    // `external` when the router file imports an external integration).
     sideEffectClass: tool.graphql
       ? tool.sideEffectClass
       : classifyByCallGraph(tool.sourceFile, root, tool.method, externalPaths),
