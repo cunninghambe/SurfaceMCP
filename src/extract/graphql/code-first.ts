@@ -12,6 +12,8 @@ import {
 } from 'ts-morph';
 import type { RawToolMeta, JsonSchema2020, GraphQLToolDescriptor } from '../../types.js';
 import { computeGraphqlToolId, operationToolName, DEFAULT_SELECTION_DEPTH } from './parse.js';
+import { isGraphqlName, isGraphqlTypeRef } from '../../graphql-names.js';
+import { log } from '../../log.js';
 
 const IGNORED_DIRS = new Set(['node_modules', 'dist', '.git', '.surfacemcp', '.next', 'build']);
 
@@ -196,6 +198,11 @@ function expandObjectClass(
   const selectionParts: string[] = [];
   for (const prop of gqlFields(cls)) {
     const fieldName = prop.getName();
+    // #gql-injection: a property name can be a string literal or computed name in
+    // TS (`@Field() 'a } query x {': string`). Anything outside the GraphQL Name
+    // grammar can never be selected legally, so drop it from both the selection
+    // and the schema rather than emitting it.
+    if (!isGraphqlName(fieldName)) continue;
     const ref = propGqlType(prop);
     const scalar = gqlScalarToJson(ref.name);
     if (scalar) {
@@ -319,7 +326,19 @@ function buildArgsAndInput(
     const name = decoratorFirstStringArg(argDec) ?? param.getName();
     const ref = argGqlType(param, argDec);
     const nullable = isArgNullable(param, argDec);
-    args.push({ name, gqlType: toSdlType(ref, nullable) });
+    const gqlType = toSdlType(ref, nullable);
+    // #gql-injection: `@Arg('…')` and the TS→GraphQL type mapping are arbitrary
+    // target-source strings. A name/type outside the GraphQL grammar would splice
+    // extra text into the variable declarations, so skip the argument entirely —
+    // out of `args` AND out of the input schema, so the two stay consistent.
+    if (!isGraphqlName(name) || !isGraphqlTypeRef(gqlType)) {
+      log.warn(
+        { arg: name, gqlType, method: method.getName() },
+        'graphql code-first: skipping argument whose name or type is not a valid GraphQL identifier'
+      );
+      continue;
+    }
+    args.push({ name, gqlType });
     properties[name] = inputTypeToJsonSchema(ref, index, new Set());
     if (!nullable) required.push(name);
   }
@@ -396,6 +415,16 @@ export function extractGraphqlCodeFirst(root: string, graphqlPath = '/graphql'):
         const op = operationDecorator(method);
         if (!op) continue;
         const field = optionsStringProp(op.decorator, 'name') ?? method.getName();
+        // #gql-injection: `@Query({ name: '…' })` is an arbitrary string literal in
+        // target source; `me { password } query evil` would splice a whole second
+        // operation into every call. Refuse the operation at discovery time.
+        if (!isGraphqlName(field)) {
+          log.warn(
+            { field, sourceFile: relative(root, sf.getFilePath()).replace(/\\/g, '/') },
+            'graphql code-first: skipping operation whose field name is not a valid GraphQL identifier'
+          );
+          continue;
+        }
         const toolId = computeGraphqlToolId(op.operationType, field);
         if (seen.has(toolId)) continue; // a field declared by two resolvers → first wins
         seen.add(toolId);

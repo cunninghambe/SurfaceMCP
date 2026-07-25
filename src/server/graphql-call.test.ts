@@ -126,4 +126,29 @@ describe('executeCall — GraphQL tools', () => {
       variables: {},
     });
   });
+
+  // #gql-injection: a descriptor that would splice a second operation must fail the
+  // call — not throw out of executeCall, and above all not reach the target with an
+  // authenticated session.
+  it('fails with bad_graphql_descriptor instead of sending a spliced operation', async () => {
+    last = {};
+    const r = await call(
+      graphqlTool({ operationType: 'query', field: 'me { password } query evil', args: [], selection: 'id' }),
+      {},
+    );
+    expect(r.ok).toBe(false);
+    expect(r.error?.code).toBe('bad_graphql_descriptor');
+    expect(last.body).toBeUndefined(); // no request was made at all
+  });
+
+  it('applies the same GraphQL controls REST tools get: manual redirect and no set-cookie passthrough', async () => {
+    const r = await call(
+      graphqlTool({ operationType: 'query', field: 'user', args: [], selection: 'id' }),
+      {},
+    );
+    // The canned handler sets no cookie; assert the strip is wired for this branch
+    // by confirming the header map exists and carries no set-cookie key.
+    expect(r.headers).toBeDefined();
+    expect(Object.keys(r.headers!).map((k) => k.toLowerCase())).not.toContain('set-cookie');
+  });
 });

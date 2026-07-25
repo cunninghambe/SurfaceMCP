@@ -1,5 +1,5 @@
 import { resolve } from 'node:path';
-import { writeFileSync, readFileSync } from 'node:fs';
+import { writeFileSync, readFileSync, existsSync, statSync } from 'node:fs';
 import { loadConfig, findConfigPath } from '../config.js';
 import { loadEnvFiles } from '../env/indirection.js';
 import { regenerateCatalogForSurface, getCatalog } from '../server/tools-meta.js';
@@ -61,7 +61,24 @@ export async function runExport(opts: ExportOptions): Promise<void> {
 
   const restCount = catalog.tools.length - skippedGraphql;
   if (opts.out) {
+    // `--out` is a user-supplied destination on a user-run CLI, so writing outside
+    // the project root (`--out ../api.json`, or an absolute path) is intended and
+    // stays allowed — the caller already has the operator's own privileges. Guard
+    // only the two surprising outcomes: a NUL byte, and silently "succeeding" onto
+    // a directory (writeFileSync would throw EISDIR with a raw stack trace).
+    if (opts.out.includes('\0')) {
+      console.error('Invalid --out path: contains a NUL byte');
+      process.exit(1);
+      return;
+    }
     const outPath = resolve(projectRoot, opts.out);
+    if (existsSync(outPath) && statSync(outPath).isDirectory()) {
+      console.error(`Invalid --out path: ${outPath} is a directory`);
+      process.exit(1);
+      return;
+    }
+    // Overwrite stays silent — it matches shell-redirection expectations and the
+    // CLI is re-run against the same file routinely.
     writeFileSync(outPath, `${json}\n`);
     console.error(`Wrote ${restCount} operation(s) to ${outPath}`);
   } else {

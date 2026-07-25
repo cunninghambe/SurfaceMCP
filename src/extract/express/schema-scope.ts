@@ -8,6 +8,7 @@ import {
   tryResolveSchemaIdentifier,
 } from '../nextjs/schemas.js';
 import type { ZodSchema } from 'zod';
+import { importTargetModule, type DynamicImportPolicy } from '../dynamic-import.js';
 
 export const DEFAULT_BODY_VALIDATOR_NAMES = [
   'validateBody',
@@ -23,11 +24,20 @@ const UNKNOWN_RESULT = { schema: UNKNOWN_SCHEMA, confidence: 'unknown' as InputS
 
 type SchemaResult = { schema: JsonSchema2020; confidence: InputSchemaConfidence };
 
+export type SchemaScopeConfig = {
+  bodyValidatorNames?: string[];
+  /**
+   * #target-code-exec: policy for the `await import(...)` used to resolve a schema
+   * re-exported from another module. Omitted ⇒ no dynamic import at all.
+   */
+  dynamicImport?: DynamicImportPolicy;
+};
+
 export async function resolveRouteSchema(
   routeCall: CallExpression,
   sf: SourceFile,
   method: string,
-  config?: { bodyValidatorNames?: string[] }
+  config?: SchemaScopeConfig
 ): Promise<SchemaResult> {
   if (SAFE_METHODS.has(method.toUpperCase())) return UNKNOWN_RESULT;
 
@@ -52,7 +62,7 @@ export async function resolveRouteSchema(
     if (!calleeName || !validatorNames.has(calleeName)) continue;
     const schemaArg = arg.getArguments()[0];
     if (!schemaArg) continue;
-    return resolveSchemaRef(schemaArg, sf, undefined);
+    return resolveSchemaRef(schemaArg, sf, undefined, config);
   }
 
   // Pattern B/C: parse/safeParse inside the handler body (last arg)
@@ -66,7 +76,7 @@ export async function resolveRouteSchema(
     const methodName = expr.getName();
     if (methodName !== 'parse' && methodName !== 'safeParse') continue;
     const lhs = expr.getExpression();
-    const result = await resolveSchemaRef(lhs, sf, handler);
+    const result = await resolveSchemaRef(lhs, sf, handler, config);
     if (result.confidence !== 'unknown') return result;
   }
 
@@ -76,7 +86,8 @@ export async function resolveRouteSchema(
 async function resolveSchemaRef(
   node: Node,
   sf: SourceFile,
-  scopeNode: Node | undefined
+  scopeNode: Node | undefined,
+  config?: SchemaScopeConfig
 ): Promise<SchemaResult> {
   // Unwrap chained calls: `schema.partial()` → resolve `schema`
   const baseNode = unwrapCallChain(node);
@@ -93,7 +104,7 @@ async function resolveSchemaRef(
 
   // Step 3: member access on imported namespace (e.g. schemas.userRegistration)
   if (Node.isPropertyAccessExpression(baseNode)) {
-    const memberResult = await tryResolveMemberAccess(baseNode, sf);
+    const memberResult = await tryResolveMemberAccess(baseNode, sf, config);
     if (memberResult.confidence !== 'unknown') return memberResult;
     // Pattern A/B found but schema reference unresolvable → inferred
     return { schema: UNKNOWN_SCHEMA, confidence: 'inferred' };
@@ -119,7 +130,8 @@ function unwrapCallChain(node: Node): Node {
 
 async function tryResolveMemberAccess(
   node: Node,
-  sf: SourceFile
+  sf: SourceFile,
+  config?: SchemaScopeConfig
 ): Promise<SchemaResult> {
   if (!Node.isPropertyAccessExpression(node)) return UNKNOWN_RESULT;
   const objExpr = node.getExpression();
@@ -134,14 +146,16 @@ async function tryResolveMemberAccess(
   const resolved = resolveImportPath(dir, importPath);
   if (!resolved) return UNKNOWN_RESULT;
 
-  try {
-    const mod = await import(resolved) as Record<string, unknown>;
+  // #target-code-exec: this EXECUTES the target's module. `resolved` is derived
+  // from an import specifier in target source, so it can point anywhere on disk
+  // (`'/tmp/evil.js'` resolves absolute, `'../../..'` escapes the root);
+  // importTargetModule realpaths it and refuses anything outside the surface root.
+  const mod = await importTargetModule(resolved, config?.dynamicImport, 'express schema re-export');
+  if (mod) {
     const candidate = findMemberInModule(mod, nsName, propName);
     if (candidate && typeof candidate === 'object' && '_def' in candidate && 'parse' in candidate) {
       return { schema: zodSchemaToJsonSchema(candidate as ZodSchema<unknown>), confidence: 'introspected' };
     }
-  } catch {
-    // dynamic import failed — not resolvable
   }
 
   return UNKNOWN_RESULT;

@@ -110,3 +110,45 @@ describe('code-first graphql extraction (type-graphql)', () => {
     expect(extractGraphqlCodeFirst(resolve(FIXTURES, 'graphql-app'), '/graphql')).toEqual([]);
   });
 });
+
+// #gql-injection: decorator arguments are arbitrary string literals in target
+// source. A hostile one must never reach a descriptor — the extractor is the first
+// of two gates (buildGraphqlOperation is the second).
+describe('code-first graphql extraction — hostile decorator literals', () => {
+  const HOSTILE = resolve(FIXTURES, 'graphql-codefirst-hostile');
+
+  it('skips operations whose @Query name is not a valid GraphQL identifier', () => {
+    const tools = extractGraphqlCodeFirst(HOSTILE, '/graphql');
+    expect(tools.find((t) => t.graphql?.field.includes(' '))).toBeUndefined();
+    expect(tools.find((t) => t.graphql?.field.includes('{'))).toBeUndefined();
+    // The clean resolver in the same file is still discovered.
+    expect(tools.find((t) => t.graphql?.field === 'safeQuery')).toBeDefined();
+  });
+
+  it('drops arguments whose @Arg name or mapped type is not a valid GraphQL identifier', () => {
+    const tools = extractGraphqlCodeFirst(HOSTILE, '/graphql');
+    for (const t of tools) {
+      for (const a of t.graphql?.args ?? []) {
+        expect(a.name, `arg name ${a.name}`).toMatch(/^[_A-Za-z][_0-9A-Za-z]*$/);
+        expect(a.gqlType, `arg type ${a.gqlType}`).toMatch(/^[[\]!_0-9A-Za-z]+$/);
+      }
+      // A dropped arg leaves no orphan entry in the input schema.
+      const props = Object.keys(t.inputSchema.properties ?? {});
+      expect(props.sort()).toEqual((t.graphql?.args ?? []).map((a) => a.name).sort());
+    }
+  });
+
+  it('drops a hostile string-literal property name from the generated selection', () => {
+    const accounts = extractGraphqlCodeFirst(HOSTILE, '/graphql').find((t) => t.graphql?.field === 'accounts');
+    expect(accounts?.graphql?.selection).toBe('id');
+    expect(Object.keys(accounts!.outputSchema!.items!.properties!)).toEqual(['id']);
+  });
+
+  it('every emitted descriptor still yields exactly one parseable operation', () => {
+    for (const t of extractGraphqlCodeFirst(HOSTILE, '/graphql')) {
+      const op = buildGraphqlOperation(t.graphql!);
+      expect(parse(op).definitions, `${t.name}: ${op}`).toHaveLength(1);
+      expect(op).not.toContain('stolen');
+    }
+  });
+});

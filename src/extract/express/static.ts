@@ -2,7 +2,7 @@ import { readdirSync, existsSync } from 'node:fs';
 import { resolve, relative } from 'node:path';
 import { Project, SyntaxKind, type CallExpression, type SourceFile } from 'ts-morph';
 import type { RawToolMeta } from '../../types.js';
-import { resolveRouteSchema } from './schema-scope.js';
+import { resolveRouteSchema, type SchemaScopeConfig } from './schema-scope.js';
 import { buildMountIndex, joinPath } from './mounts.js';
 import { toolId, pathToToolName, methodToSideEffect } from '../common.js';
 
@@ -66,9 +66,14 @@ function walkDir(dir: string, files: string[] = []): string[] {
 export async function extractExpressRoutes(
   root: string,
   zodAlias?: string,
-  bodyValidatorNames?: string[]
+  bodyValidatorNames?: string[],
+  /** #target-code-exec: `false` disables the schema-introspection dynamic import. */
+  allowDynamicImport = true
 ): Promise<RawToolMeta[]> {
-  const schemaConfig = bodyValidatorNames ? { bodyValidatorNames } : undefined;
+  const schemaConfig: SchemaScopeConfig = {
+    ...(bodyValidatorNames ? { bodyValidatorNames } : {}),
+    dynamicImport: { root, enabled: allowDynamicImport },
+  };
   const allFiles = walkDir(root);
 
   // One Project for the entire extraction — shared by mount index + schema scope
