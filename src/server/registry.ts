@@ -4,6 +4,7 @@ import { regenerateCatalog, regeneratePageCatalog } from './tools-meta.js';
 import { regenerateNavigationCatalog } from './navigation-catalog.js';
 import { startWatcher } from '../watch/chokidar-driver.js';
 import { CallLimiter } from './rails.js';
+import { CoverageTracker } from './coverage.js';
 import { log } from '../log.js';
 import type {
   Config,
@@ -40,6 +41,7 @@ function createRuntime(surface: SurfaceConfig, resolvedRoot: string): SurfaceRun
     // One limiter per surface so rate/concurrency caps are enforced across all
     // callers of that target, not per-request.
     limiter: new CallLimiter(surface.rails ?? {}),
+    coverage: new CoverageTracker(),
   };
 }
 

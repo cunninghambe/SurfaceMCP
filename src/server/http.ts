@@ -178,7 +178,28 @@ function registerMetaTools(
     async (args) => {
       const resolved = resolveTool(registry, { name: args.name, toolId: args.toolId, surface: args.surface });
       if ('error' in resolved) return toolError(resolved.error.code, resolved.error.message);
-      return toolOk({ ...resolved.tool });
+      // Surface a response schema learned from observed successful calls when the
+      // extractor couldn't determine one statically.
+      const learned = resolved.runtime.coverage?.learnedSchemaFor(resolved.tool.toolId);
+      return toolOk({
+        ...resolved.tool,
+        ...(learned && !resolved.tool.outputSchema ? { learnedOutputSchema: learned } : {}),
+      });
+    }
+  );
+
+  // surface_coverage — which of the discovered surface has actually been exercised
+  server.tool(
+    'surface_coverage',
+    'Report call coverage for a surface: per-tool call counts and statuses seen, which tools have never been called, and response schemas learned from successful calls. Use it to find the untested part of the surface.',
+    {
+      surface: z.string().optional().describe('Surface name (required in multi-surface configs)'),
+    },
+    async (args) => {
+      const rt = resolveRuntime(registry, args.surface);
+      if ('error' in rt) return toolError('surface_required', rt.error);
+      if (!rt.coverage) return toolError('not_available', 'Coverage tracking is not enabled for this surface.');
+      return toolOk({ surface: rt.surface.name, ...rt.coverage.snapshot(rt.catalog.tools) });
     }
   );
 
@@ -266,6 +287,7 @@ function registerMetaTools(
         readOnly: runtime.surface.rails?.readOnly === true || args.readOnly === true,
         dryRun: args.dryRun === true,
         limiter: runtime.limiter,
+        observer: runtime.coverage,
       });
       return toolOk(result);
     }
@@ -562,7 +584,7 @@ export async function createApp(
     for (const sName of registry.order) {
       const runtime = registry.surfaces.get(sName)!;
       if (runtime.state.kind !== 'ready') continue;
-      registerGeneratedTools(server, runtime.catalog, runtime.surface, runtime.roleMutex!, runtime.resolvedRoot, runtime.limiter);
+      registerGeneratedTools(server, runtime.catalog, runtime.surface, runtime.roleMutex!, runtime.resolvedRoot, runtime.limiter, runtime.coverage);
     }
 
     const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });

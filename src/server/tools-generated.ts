@@ -6,6 +6,7 @@ import { executeCall } from './call.js';
 import { jsonSchemaToZod } from './schema-to-zod.js';
 import { extractPathParams, withPathParams } from './path-params.js';
 import type { CallLimiter } from './rails.js';
+import type { CoverageTracker as CallObserver } from './coverage.js';
 import { log } from '../log.js';
 
 export function registerGeneratedTools(
@@ -14,10 +15,11 @@ export function registerGeneratedTools(
   surface: SurfaceConfig,
   roleMutex: RoleMutex,
   root: string,
-  limiter?: CallLimiter
+  limiter?: CallLimiter,
+  observer?: CallObserver
 ): void {
   for (const tool of catalog.tools) {
-    registerOneTool(server, tool, catalog.revision, surface, roleMutex, root, limiter);
+    registerOneTool(server, tool, catalog.revision, surface, roleMutex, root, limiter, observer);
   }
 }
 
@@ -28,7 +30,8 @@ function registerOneTool(
   surface: SurfaceConfig,
   roleMutex: RoleMutex,
   _root: string,
-  limiter?: CallLimiter
+  limiter?: CallLimiter,
+  observer?: CallObserver
 ): void {
   const pathParams = extractPathParams(tool.path);
   const effectiveSchema = withPathParams(tool.inputSchema, pathParams);
@@ -77,6 +80,7 @@ function registerOneTool(
           readOnly: surface.rails?.readOnly === true || args.readOnly === true,
           dryRun: args.dryRun === true,
           limiter,
+          observer,
         });
         return {
           content: [{ type: 'text' as const, text: JSON.stringify(result) }],

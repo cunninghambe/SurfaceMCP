@@ -33,6 +33,8 @@ type CallParams = {
   dryRun?: boolean;
   /** Rails: per-surface rate/concurrency limiter. Omitted = unbounded. */
   limiter?: CallLimiter;
+  /** Coverage/telemetry sink. Called with the final result; must never throw. */
+  observer?: { record: (tool: ToolMeta, result: SurfaceCallResult) => void };
 };
 
 function buildHeaders(
@@ -185,7 +187,17 @@ async function readBodyWithLimit(
   return { body: text, truncated };
 }
 
+/**
+ * Execute a discovered tool. Thin wrapper so coverage observation happens on
+ * every return path (guards, dry runs, failures, successes) in one place.
+ */
 export async function executeCall(params: CallParams): Promise<SurfaceCallResult> {
+  const result = await executeCallInner(params);
+  params.observer?.record(params.tool, result);
+  return result;
+}
+
+async function executeCallInner(params: CallParams): Promise<SurfaceCallResult> {
   const start = Date.now();
 
   // Check revision pin

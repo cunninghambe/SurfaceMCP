@@ -383,6 +383,8 @@ export type SurfaceRuntime = {
   watcher?: { close: () => Promise<void> };
   /** Per-surface rate/concurrency limiter for outbound calls (rails). */
   limiter?: import('./server/rails.js').CallLimiter;
+  /** Per-surface call coverage + learned response schemas. */
+  coverage?: import('./server/coverage.js').CoverageTracker;
 };
 
 export type SurfaceRegistry = {
