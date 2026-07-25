@@ -3,8 +3,10 @@ import { resolve, relative } from 'node:path';
 import { Project, SyntaxKind, type CallExpression, type SourceFile } from 'ts-morph';
 import type { RawToolMeta } from '../../types.js';
 import { resolveRouteSchema, type SchemaScopeConfig } from './schema-scope.js';
+import { resolveResponseSchema } from './response-type.js';
 import { buildMountIndex, joinPath } from './mounts.js';
 import { toolId, pathToToolName, methodToSideEffect } from '../common.js';
+import { buildTypeIndex } from '../ts-type-schema.js';
 
 type RouteCall = {
   method: string;
@@ -88,6 +90,10 @@ export async function extractExpressRoutes(
   // Build mount prefix map: CallExpression -> string[] of absolute prefixes
   const mountIndex = buildMountIndex(project);
 
+  // Named-type index for response typing. `includeShapes` is on because Express
+  // apps declare response bodies as plain interfaces / type aliases, not classes.
+  const typeIndex = buildTypeIndex(project, { includeShapes: true });
+
   // Collect all raw route calls across all files
   const rawRoutes: RouteCall[] = [];
   for (const sf of project.getSourceFiles()) {
@@ -102,6 +108,10 @@ export async function extractExpressRoutes(
 
     // Determine the prefixes for this call node
     const prefixes = callNode ? (mountIndex.get(callNode) ?? null) : null;
+
+    // The response shape depends only on the handler, so it is resolved once per
+    // route call even when the router is mounted at several prefixes.
+    const output = callNode && sf ? resolveResponseSchema(callNode, sf, typeIndex) : {};
 
     // Build the list of (method, path) pairs to emit
     const emissions: { method: string; path: string }[] =
@@ -127,6 +137,7 @@ export async function extractExpressRoutes(
         path,
         inputSchema: schema,
         inputSchemaConfidence: confidence,
+        ...output,
         sideEffectClass: methodToSideEffect(method),
         sourceFile: relative(root, route.sourceFile),
         sourceLine: route.sourceLine,

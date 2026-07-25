@@ -1,12 +1,20 @@
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { resolve, dirname, relative } from 'node:path';
-import type { RawToolMeta, JsonSchema2020 } from '../../types.js';
+import type { RawToolMeta, JsonSchema2020, OutputSchemaConfidence } from '../../types.js';
 import { toolId, pathToToolName, methodToSideEffect } from '../common.js';
+import {
+  buildSerializerIndex,
+  extractClassBlock,
+  serializerSchema,
+  type SerializerIndex,
+} from './serializers.js';
 
 type RouteEntry = {
   method: string;
   path: string;
   viewName: string;
+  outputSchema?: JsonSchema2020;
+  outputSchemaConfidence?: OutputSchemaConfidence;
   sourceFile: string;
   sourceLine: number;
 };
@@ -56,22 +64,12 @@ function parseUrlsFile(content: string): ParsedEntry[] {
   return entries;
 }
 
-/** Escape a target-derived string so it can be embedded in a RegExp as a literal. */
-function escapeRegExp(s: string): string {
-  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-}
-
 function methodsForClass(className: string, viewsContent: string): string[] {
-  // The class name comes from the target's urls.py, so it can contain regex
-  // metacharacters — unescaped they either throw (crashing extraction) or build a
-  // pathological pattern over the whole views file. Embed it as a literal.
-  const re = new RegExp(`class\\s+${escapeRegExp(className)}\\b[^:]*:`, 'm');
-  const m = re.exec(viewsContent);
-  if (!m) return [];
-  const after = viewsContent.slice(m.index + m[0].length);
-  // Stop at the next top-level (column-0) class or def — those terminate the class block.
-  const end = after.search(/^(?:class|def)\s+/m);
-  const body = end === -1 ? after : after.slice(0, end);
+  // Class block slicing is shared with the serializer walk (stops at the next
+  // column-0 class or def — those terminate the class block).
+  const block = extractClassBlock(className, viewsContent);
+  if (!block) return [];
+  const body = block.body;
 
   const httpMethodNames = /http_method_names\s*=\s*\[([^\]]+)\]/.exec(body);
   if (httpMethodNames) {
@@ -123,16 +121,85 @@ function findUrlsFile(root: string, modulePath: string): string | null {
   return null;
 }
 
-/** Try to load the views file for the current urls.py directory */
-function loadViewsContent(urlsFilePath: string): string {
-  const dir = dirname(urlsFilePath);
-  const viewsPath = resolve(dir, 'views.py');
-  if (!existsSync(viewsPath)) return '';
+/** Try to load a sibling module of the current urls.py directory */
+function loadSiblingModule(urlsFilePath: string, moduleFile: string): string {
+  const path = resolve(dirname(urlsFilePath), moduleFile);
+  if (!existsSync(path)) return '';
   try {
-    return readFileSync(viewsPath, 'utf-8');
+    return readFileSync(path, 'utf-8');
   } catch {
     return '';
   }
+}
+
+/** Try to load the views file for the current urls.py directory */
+function loadViewsContent(urlsFilePath: string): string {
+  return loadSiblingModule(urlsFilePath, 'views.py');
+}
+
+// ─── Response typing ──────────────────────────────────────────────────────────
+
+/** Body of one `def <name>(...)` inside a class block, up to the next sibling def. */
+function methodBlock(classBody: string, methodName: string): string | null {
+  const re = new RegExp(`^([ \\t]+)def\\s+${methodName}\\s*\\(`, 'm');
+  const m = re.exec(classBody);
+  if (!m) return null;
+  const rest = classBody.slice(m.index + m[0].length);
+  const end = rest.search(new RegExp(`^[ \\t]{0,${m[1].length}}def\\s+`, 'm'));
+  return end === -1 ? rest : rest.slice(0, end);
+}
+
+/** True when the route addresses a single object (`/items/:pk/`) rather than a collection. */
+function pathTargetsDetail(path: string): boolean {
+  const segments = path.split('/').filter((s) => s.length > 0);
+  const last = segments[segments.length - 1];
+  return last !== undefined && last.startsWith(':');
+}
+
+/**
+ * Response schema for one (view, method) pair, from the view's DRF
+ * `serializer_class`. Always 'inferred': a serializer describes the *intended*
+ * body, but a view can override `to_representation`, paginate, or return a bare
+ * dict, none of which DRF forces to match.
+ *
+ * The result is wrapped in an array when the view plainly serializes a
+ * collection: `Serializer(qs, many=True)` inside the handler (strongest), or a
+ * generic `List*` / `*ViewSet` base handling a GET on a collection path.
+ * DELETE is skipped outright — DRF's destroy returns 204 with no body.
+ */
+function resolveViewOutput(
+  viewRef: string,
+  method: string,
+  path: string,
+  viewsContent: string,
+  serializerIndex: SerializerIndex
+): { outputSchema?: JsonSchema2020; outputSchemaConfidence?: OutputSchemaConfidence } {
+  if (method === 'DELETE' || method === 'HEAD' || method === 'OPTIONS') return {};
+  if (!viewsContent || serializerIndex.size === 0) return {};
+
+  const className = viewRef.split('.').pop();
+  if (!className) return {};
+  const block = extractClassBlock(className, viewsContent);
+  if (!block) return {};
+
+  const declared = /^\s*serializer_class\s*=\s*([A-Za-z_]\w*)/m.exec(block.body);
+  if (!declared) return {};
+  const serializerName = declared[1];
+
+  const schema = serializerSchema(serializerName, serializerIndex);
+  if (!schema || Object.keys(schema.properties ?? {}).length === 0) return {};
+
+  const handlerBody = methodBlock(block.body, method.toLowerCase()) ?? '';
+  const manyInHandler = new RegExp(`${serializerName}\\s*\\([^)]*\\bmany\\s*=\\s*True`).test(
+    handlerBody
+  );
+  const listBase = /\bList[A-Za-z]*(?:APIView|View|Mixin)\b|\bViewSet\b/.test(block.header);
+  const isCollection = manyInHandler || (method === 'GET' && listBase && !pathTargetsDetail(path));
+
+  return {
+    outputSchema: isCollection ? { type: 'array', items: schema } : schema,
+    outputSchemaConfidence: 'inferred',
+  };
 }
 
 function walkUrlsFile(
@@ -151,8 +218,10 @@ function walkUrlsFile(
     return [];
   }
 
-  // Also load sibling views.py to get method info
+  // Also load sibling views.py to get method info, and serializers.py for
+  // response typing (both optional — a missing file just yields less metadata).
   const viewsContent = loadViewsContent(filePath);
+  const serializerIndex = buildSerializerIndex(loadSiblingModule(filePath, 'serializers.py'));
 
   const entries = parseUrlsFile(content);
   const routes: RouteEntry[] = [];
@@ -177,6 +246,7 @@ function walkUrlsFile(
         method,
         path,
         viewName: entry.viewRef,
+        ...resolveViewOutput(entry.viewRef, method, path, viewsContent, serializerIndex),
         sourceFile: filePath,
         sourceLine: entry.sourceLine,
       });
@@ -244,6 +314,9 @@ export function extractDjangoRoutes(root: string): RawToolMeta[] {
       path: route.path,
       inputSchema: EMPTY_SCHEMA,
       inputSchemaConfidence: 'unknown',
+      ...(route.outputSchema
+        ? { outputSchema: route.outputSchema, outputSchemaConfidence: route.outputSchemaConfidence }
+        : {}),
       sideEffectClass: methodToSideEffect(route.method),
       sourceFile: relative(root, route.sourceFile),
       sourceLine: route.sourceLine,

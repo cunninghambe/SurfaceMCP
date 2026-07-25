@@ -100,7 +100,7 @@ surfacemcp schema > surfacemcp.config.schema.json
 Discovery: `surface_list_tools`, `surface_describe_tool`, `surface_describe_self`, `surface_list_surfaces`, `surface_list_pages`, `surface_routes_for_page`, `surface_list_navigations`.
 Invocation: `surface_call`, `surface_probe`, `surface_sample_inputs`.
 
-Tools carry both an `inputSchema` and, where the source provides it (OpenAPI/FastAPI response schemas), an `outputSchema` describing what a call returns. The whole surface can be exported as a portable OpenAPI 3.1 document with `surfacemcp export`.
+Tools carry both an `inputSchema` and, where the source provides it, an `outputSchema` describing what a call returns, tagged with an `outputSchemaConfidence` of `introspected` (a declared contract: an OpenAPI/FastAPI response schema, a Fastify `schema.response`, a GraphQL SDL return type, a Nest `@ApiResponse`) or `inferred` (derived from source: a TS return type or `Response<T>` generic, a `res.json(...)` literal, a DRF `serializer_class`). Inference is best-effort and conservative — a handler whose branches disagree on the response shape advertises no schema rather than a wrong one. See `SPEC_REST_RESPONSE_TYPING.md` for the per-stack rules and limits. The whole surface can be exported as a portable OpenAPI 3.1 document with `surfacemcp export`.
 Auth: `surface_describe_auth`, `surface_login_status`, `surface_relogin`.
 Runtime route enumeration: `surface_enumerate_routes_runtime`, `surface_postprocess_runtime_routes`.
 Change detection: `surface_diff`.

@@ -348,7 +348,8 @@ export function extractGraphqlSchema(root: string, graphqlPath = '/graphql'): Ra
         path: graphqlPath,
         inputSchema,
         inputSchemaConfidence: 'introspected',
-        ...(outputSchema ? { outputSchema } : {}),
+        // Derived from the SDL's declared return type — the schema *is* the contract.
+        ...(outputSchema ? { outputSchema, outputSchemaConfidence: 'introspected' as const } : {}),
         sideEffectClass: operationType === 'query' ? 'safe' : 'mutating',
         sourceFile: file,
         sourceLine: fieldLine(field, loaded.singleFile),

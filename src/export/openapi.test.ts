@@ -57,6 +57,26 @@ describe('buildOpenApiDocument', () => {
     const responses = op.responses as { '200': { content?: { 'application/json': { schema: unknown } } } };
     expect(responses['200'].content?.['application/json'].schema).toEqual({ type: 'object', properties: { ok: { type: 'boolean' } } });
     expect(op['x-surfacemcp-tool-id']).toBe('deadbe');
+    // No outputSchemaConfidence on the tool → the extension is omitted entirely.
+    expect(op).not.toHaveProperty('x-surfacemcp-output-confidence');
+  });
+
+  it('carries outputSchemaConfidence through as a provenance extension', () => {
+    const doc = buildOpenApiDocument(
+      [
+        tool({
+          method: 'GET',
+          path: '/u',
+          name: 'get_u',
+          toolId: 'deadbe',
+          outputSchema: { type: 'object', properties: { ok: { type: 'boolean' } } },
+          outputSchemaConfidence: 'inferred',
+        }),
+      ],
+      { title: 'API', version: '1.0.0' },
+    );
+    const op = (doc.paths as Record<string, Record<string, Record<string, unknown>>>)['/u']!.get!;
+    expect(op['x-surfacemcp-output-confidence']).toBe('inferred');
   });
 });
 

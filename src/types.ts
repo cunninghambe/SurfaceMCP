@@ -27,6 +27,21 @@ export type JsonSchema2020 = {
 };
 
 export type InputSchemaConfidence = 'introspected' | 'inferred' | 'partial' | 'unknown';
+
+/**
+ * Provenance of `outputSchema`. Mirrors `InputSchemaConfidence`, narrowed to the
+ * two values a *populated* response schema can carry (the field is absent
+ * whenever `outputSchema` is absent, so there is no 'unknown' state to encode):
+ * - 'introspected': the app declares the response shape and we read it verbatim
+ *   (an OpenAPI/FastAPI `responses` entry, a Fastify `schema.response[2xx]`, a
+ *   GraphQL SDL return type, a Nest `@ApiResponse({ type })` decorator).
+ * - 'inferred': derived from source analysis that the framework does not treat
+ *   as a contract (a TS return type / generic, a `res.json(...)` literal, a DRF
+ *   `serializer_class`). Best-effort — a superset or subset of the real body is
+ *   possible.
+ */
+export type OutputSchemaConfidence = Extract<InputSchemaConfidence, 'introspected' | 'inferred'>;
+
 export type SideEffectClass = 'safe' | 'mutating' | 'external';
 
 /**
@@ -86,6 +101,11 @@ export type RawToolMeta = {
   inputSchema: JsonSchema2020;
   inputSchemaConfidence: InputSchemaConfidence;
   outputSchema?: JsonSchema2020;
+  /**
+   * Provenance of `outputSchema`. Set iff `outputSchema` is set; optional so
+   * consumers written before response typing existed are unaffected.
+   */
+  outputSchemaConfidence?: OutputSchemaConfidence;
   sideEffectClass: SideEffectClass;
   sourceFile: string;
   sourceLine: number;

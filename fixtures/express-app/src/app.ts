@@ -1,4 +1,4 @@
-import express from 'express';
+import express, { type Response } from 'express';
 import { z } from 'zod';
 
 const app = express();
@@ -10,8 +10,14 @@ const productSchema = z.object({
   category: z.string().optional(),
 });
 
-app.get('/api/products', (_req, res) => {
-  res.json({ products: [] });
+// Declared response body type — the strongest signal Express offers.
+interface ProductListBody {
+  products: string[];
+  total: number;
+}
+
+app.get('/api/products', (_req, res: Response<ProductListBody>) => {
+  res.json({ products: [], total: 0 });
 });
 
 app.post('/api/products', (req, res) => {
