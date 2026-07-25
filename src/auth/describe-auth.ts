@@ -1,5 +1,6 @@
 import type { AuthConfig, RoleConfig, DescribeAuthResult, SuccessCheck, CredentialFieldMeta } from '../types.js';
 import { resolveCredentials } from '../env/indirection.js';
+import { OAUTH2_CREDENTIAL_FIELDS, resolveOAuth2CredentialKeys } from './oauth2.js';
 import { log } from '../log.js';
 
 const NEXTAUTH_DEFAULT_COOKIE = 'authjs.session-token';
@@ -106,6 +107,50 @@ function buildNextAuthResult(
 }
 
 /**
+ * OAuth2 client-credentials: report the non-secret shape of the token request
+ * (endpoint, grant, client-auth style, scope/audience) plus which role credential
+ * key supplies each field and its `valueMeta`.
+ *
+ * The client secret is NEVER included — not even under `revealSecrets`. Unlike
+ * form/nextauth there is no browser login for a caller to drive with it, so
+ * revealing it would be disclosure with no consumer. Access tokens live only on
+ * the session and are likewise never described here.
+ */
+function buildOAuth2Result(
+  auth: Extract<AuthConfig, { kind: 'oauth2' }>,
+  role: RoleConfig
+): Extract<DescribeAuthResult, { authKind: 'oauth2' }> {
+  const rawCredentials = role.credentials!;
+  const credKeys = resolveOAuth2CredentialKeys(rawCredentials);
+
+  // buildFieldData maps { credentialKey -> reportedName }; for oauth2 the
+  // reported name is the canonical field. A field the role does not declare is
+  // keyed by its canonical name so it reports source: 'missing'.
+  const fieldMap: Record<string, string> = {};
+  for (const field of OAUTH2_CREDENTIAL_FIELDS) {
+    fieldMap[credKeys[field] ?? field] = field;
+  }
+
+  // reveal: false — hard-coded, see the note above.
+  const { valueMeta } = buildFieldData(fieldMap, rawCredentials, role.name, false);
+
+  return {
+    authKind: 'oauth2',
+    reason: 'programmatic_only',
+    detail:
+      'OAuth2 client-credentials auth cannot drive a browser; skip browser login. Tokens are minted from the token endpoint and sent as an Authorization header.',
+    tokenUrl: auth.tokenUrl,
+    grantType: auth.grantType ?? 'client_credentials',
+    clientAuth: auth.clientAuth ?? 'basic',
+    ...(auth.scope !== undefined && { scope: auth.scope }),
+    ...(auth.audience !== undefined && { audience: auth.audience }),
+    fields: { ...fieldMap },
+    valueMeta,
+    redacted: true,
+  };
+}
+
+/**
  * Build the auth description for a role.
  *
  * Credential VALUES are redacted by default: only field names and per-field
@@ -129,6 +174,9 @@ export function buildDescribeAuth(
       return { authKind: 'bearer', reason: 'programmatic_only', detail: 'Bearer-token auth cannot drive a browser; skip browser login.' };
     case 'api_key':
       return { authKind: 'api_key', reason: 'programmatic_only', detail: 'API-key auth cannot drive a browser; skip browser login.' };
+    case 'oauth2':
+      // revealSecrets deliberately not threaded through: see buildOAuth2Result.
+      return buildOAuth2Result(auth, role);
     case 'form':
       return buildFormResult(auth, role, revealSecrets);
     case 'nextauth':

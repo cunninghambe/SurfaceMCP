@@ -186,6 +186,30 @@ export type DescribeAuthResult =
   | { authKind: 'api_key'; reason: 'programmatic_only'; detail: string }
   | { authKind: 'anonymous'; reason: 'role_has_no_credentials' }
   | {
+      authKind: 'oauth2';
+      reason: 'programmatic_only';
+      detail: string;
+      /** Token endpoint from the auth config (never carries credentials). */
+      tokenUrl: string;
+      grantType: 'client_credentials';
+      clientAuth: 'basic' | 'body';
+      scope?: string;
+      audience?: string;
+      /**
+       * Role credential key → canonical OAuth2 field name (`client_id` /
+       * `client_secret`), same orientation as the form/nextauth `fields` map.
+       */
+      fields: Record<string, string>;
+      /** Per-field shape metadata, keyed by canonical field name. Never secret. */
+      valueMeta: Record<string, CredentialFieldMeta>;
+      /**
+       * Always `true`. Unlike form/nextauth there is no browser login to drive
+       * with these values, so the client secret is never revealed — `revealSecrets`
+       * does not apply to this kind.
+       */
+      redacted: true;
+    }
+  | {
       authKind: 'form';
       uiLoginPath: string;
       uiTriggerSelector?: string;
@@ -223,6 +247,22 @@ export type RoleSession = {
   cachedAt: string;
   lastRefreshAt?: string;
   refreshCount: number;
+  /**
+   * `token_type` from an OAuth2 token response, normalized ('Bearer' unless the
+   * authorization server returned something else). Only set for `auth.kind: 'oauth2'`.
+   */
+  tokenType?: string;
+  /**
+   * Epoch ms after which `token` must be re-minted (from `expires_in`, minus a
+   * safety skew). Only set for `auth.kind: 'oauth2'`; when set, `ensureSession`
+   * re-authenticates proactively instead of waiting for a 401.
+   */
+  expiresAt?: number;
+  /**
+   * OAuth2 refresh token, when the authorization server returned one. SECRET:
+   * never logged and never returned over the MCP wire.
+   */
+  refreshToken?: string;
 };
 
 export type SurfaceCallResult = {

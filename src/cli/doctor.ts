@@ -1,6 +1,7 @@
 import { loadConfig, findConfigPath, findLiteralCredentialPaths } from '../config.js';
 import { loadEnvFiles } from '../env/indirection.js';
 import { RoleMutex } from '../auth/role-mutex.js';
+import { isInsecureTokenUrl, missingOAuth2CredentialKeys } from '../auth/oauth2.js';
 import { regenerateCatalogForSurface, getCatalog } from '../server/tools-meta.js';
 import { resolve } from 'node:path';
 
@@ -41,6 +42,37 @@ export async function runDoctor(opts: DoctorOptions): Promise<void> {
     console.log(`Base URL (${surface.baseUrl}): ${res.status < 500 ? 'reachable' : 'error ' + res.status}`);
   } catch {
     console.warn(`Base URL (${surface.baseUrl}): unreachable`);
+  }
+
+  // OAuth2: validate the token endpoint + credential presence before loginAll()
+  // actually mints tokens below. Reports key names and statuses only.
+  if (surface.auth.kind === 'oauth2') {
+    const { tokenUrl } = surface.auth;
+    if (isInsecureTokenUrl(tokenUrl)) {
+      console.warn(
+        `\nWARN: OAuth2 tokenUrl (${tokenUrl}) is neither https nor loopback — the client secret would cross the network in cleartext.`
+      );
+    }
+    try {
+      // GET, not POST: a reachability probe must never send client credentials.
+      // A 4xx (typically 405/400) still proves the endpoint is answering.
+      const res = await fetch(tokenUrl, {
+        method: 'GET',
+        redirect: 'manual',
+        signal: AbortSignal.timeout(3_000),
+      });
+      console.log(`OAuth2 token URL (${tokenUrl}): ${res.status < 500 ? 'reachable' : 'error ' + res.status} (status ${res.status})`);
+    } catch {
+      console.warn(`OAuth2 token URL (${tokenUrl}): unreachable`);
+    }
+    for (const role of surface.roles) {
+      const missing = missingOAuth2CredentialKeys(role.credentials ?? {});
+      if (role.credentials && Object.keys(role.credentials).length > 0 && missing.length > 0) {
+        console.warn(
+          `WARN: role "${role.name}" is missing OAuth2 credential(s): ${missing.join(', ')} (set them in .env.local and reference as $env:VAR)`
+        );
+      }
+    }
   }
 
   // Regenerate and count tools

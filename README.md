@@ -151,6 +151,40 @@ The catalog is sorted by quality: confidence desc, siblingNavigations asc, prefe
 
 `surfacemcp init` writes `surfacemcp.config.json` (committed) describing one or more `surfaces`, each with a stack, `baseUrl`, port, auth kind, and roles. Secrets live in `.env.local` (gitignored) and are referenced with `$env:VAR` indirection — never inline literals. See [surfacemcp.config.example.json](surfacemcp.config.example.json) and [.env.example](.env.example).
 
+### Auth kinds
+
+`auth.kind` selects how a role authenticates: `none`, `form`, `nextauth`, `bearer`, `api_key`, or `oauth2`. Whatever the kind, the `auth` block never holds secrets — credentials come from `roles[].credentials` via `$env:` indirection.
+
+#### `oauth2` — OAuth2 / OIDC client credentials
+
+For APIs fronted by an OAuth2 or OIDC authorization server (the machine-to-machine
+[client-credentials grant](https://www.rfc-editor.org/rfc/rfc6749#section-4.4)):
+
+```jsonc
+"auth": {
+  "kind": "oauth2",
+  "tokenUrl": "https://auth.example.com/oauth2/token",  // required
+  "grantType": "client_credentials",                    // optional, the default
+  "clientAuth": "basic",                                // optional: "basic" (default) | "body"
+  "scope": "read:things write:things",                  // optional
+  "audience": "https://api.example.com"                 // optional
+},
+"roles": [
+  {
+    "name": "service",
+    "credentials": {
+      "client_id": "$env:API_CLIENT_ID",
+      "client_secret": "$env:API_CLIENT_SECRET"
+    }
+  }
+]
+```
+
+- **`clientAuth`** — `basic` sends the credentials as an HTTP Basic header (RFC 6749 §2.3.1's preferred form); `body` sends `client_id`/`client_secret` as form fields for servers that require it. Either way they travel in the request, never in a URL.
+- **Token lifecycle.** The access token is minted on first use and cached with its expiry (`expires_in` minus a 30 s safety skew). SurfaceMCP re-authenticates **proactively** once that expiry passes, instead of waiting for a 401 — and concurrent calls collapse onto a single token request per role. A 401 bearer challenge from the API still triggers a re-auth + retry as a backstop. If the authorization server returns a `refresh_token`, it is used for the next re-auth, falling back to a fresh client-credentials request if it is rejected.
+- **Outbound calls** carry `Authorization: Bearer <token>` (or the server's `token_type` when it isn't Bearer).
+- **Secrets.** The client secret and the minted tokens are never logged, never returned by `surface_describe_auth` (which reports only the request shape and per-field `present`/`length`/`source` metadata — `revealSecrets` does not apply to this kind), and never returned by `surface_login_status`. `surfacemcp doctor` warns if `tokenUrl` is neither https nor loopback and names any missing credential keys. See [SPEC_OAUTH2_AUTH.md](SPEC_OAUTH2_AUTH.md).
+
 ## Security model
 
 The MCP endpoint binds to `127.0.0.1` and proxies calls to the configured `baseUrl` only — tool arguments never choose the target host. Credentials are read from a gitignored env file and are never logged.

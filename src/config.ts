@@ -64,6 +64,41 @@ const AuthConfigSchema = z.discriminatedUnion('kind', [
     header: z.string().optional(),
     query: z.string().optional(),
   }),
+  // OAuth2 / OIDC client-credentials grant (RFC 6749 §4.4) — the machine-to-machine
+  // grant that fits SurfaceMCP's non-interactive model. NOTE: this block carries no
+  // secrets. `client_id`/`client_secret` come from the role's `credentials` map via
+  // `$env:` indirection, exactly like every other auth kind.
+  z.object({
+    kind: z.literal('oauth2'),
+    /** Absolute token endpoint URL, e.g. https://auth.example.com/oauth2/token.
+     * Restricted to http(s) with no embedded userinfo: the client secret is
+     * POSTed here, so no other scheme (file:, data:, …) may be dialled, and
+     * credentials must come from the role's `credentials` map — never a URL. */
+    tokenUrl: z
+      .string()
+      .url()
+      .refine((u) => /^https?:\/\//i.test(u), { message: 'tokenUrl must be an http(s) URL' })
+      .refine(
+        (u) => {
+          try {
+            const parsed = new URL(u);
+            return parsed.username === '' && parsed.password === '';
+          } catch {
+            return false;
+          }
+        },
+        { message: 'tokenUrl must not embed credentials (user:password@); use roles[].credentials' }
+      ),
+    /** Only the client-credentials grant is supported. Defaults to 'client_credentials'. */
+    grantType: z.enum(['client_credentials']).optional(),
+    /** Space-delimited scopes requested in the token request. */
+    scope: z.string().optional(),
+    /** `audience` form parameter (Auth0/Okta-style resource selector). */
+    audience: z.string().optional(),
+    /** How the client credentials are presented. Defaults to 'basic' (RFC 6749 §2.3.1
+     * prefers HTTP Basic); 'body' sends client_id/client_secret as form fields. */
+    clientAuth: z.enum(['basic', 'body']).optional(),
+  }),
 ]);
 
 const RoleConfigSchema = z.object({
@@ -163,6 +198,11 @@ export type Config = z.infer<typeof ConfigSchema>;
  * `$env:VAR` indirection. Literals in a committed config file are a secret-leak
  * risk; secrets belong in a gitignored env file. Returns human-readable paths
  * like `surfaces[0].roles[1].credentials.password`.
+ *
+ * Auth-kind agnostic by construction: every kind sources its secrets from
+ * `roles[].credentials` (form/nextauth passwords, `token`, `api_key`, and the
+ * oauth2 `client_secret`), so a new auth kind is covered without changes here.
+ * Auth blocks themselves never hold secrets.
  */
 export function findLiteralCredentialPaths(config: Config): string[] {
   const paths: string[] = [];
