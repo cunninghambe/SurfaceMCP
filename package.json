@@ -41,6 +41,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:e2e": "npm run build && vitest run --config vitest.e2e.config.ts",
+    "prepare": "npm run build",
     "prepublishOnly": "npm run build && npm run typecheck && npm test"
   },
   "dependencies": {
